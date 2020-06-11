@@ -5,6 +5,8 @@
  */
 
 #include "pin.H"
+#include "xed-category-enum.h"
+
 #include <iostream>
 #include <fstream>
 #include <stdlib.h>
@@ -13,6 +15,8 @@
 
 #define NUM_INSTR_DESTINATIONS 2
 #define NUM_INSTR_SOURCES 4
+
+#define INSTR_WRITE_TEXT 1
 
 typedef struct trace_instr_format {
     unsigned long long int ip;  // instruction pointer (program counter) value
@@ -123,7 +127,31 @@ void EndInstruction()
         if(instrCount <= (KnobTraceInstructions.Value()+KnobSkipInstructions.Value()))
         {
             // keep tracing
+#ifndef	INSTR_WRITE_TEXT
             fwrite(&curr_instr, sizeof(trace_instr_format_t), 1, out);
+#else
+            if (curr_instr.is_branch) {
+                fprintf(out, "Is a branch instruction \n");
+                fprintf(out, "0x%llx\n", curr_instr.ip);
+                fprintf(out, "0x%#x\n", curr_instr.is_branch);
+                fprintf(out, "0x%#x\n", curr_instr.branch_taken);
+                for (int i=0; i<NUM_INSTR_DESTINATIONS; i++) {
+                    fprintf(out, "0x%#x\n", curr_instr.destination_registers[i]);
+                }
+
+                for (int i=0; i<NUM_INSTR_SOURCES; i++) {
+                    fprintf(out, "0x%#x\n", curr_instr.source_registers[i]);
+                }
+
+                for (int i=0; i<NUM_INSTR_DESTINATIONS; i++) {
+                    fprintf(out, "0x%llx\n", curr_instr.destination_memory[i]);
+                }
+
+                for (int i=0; i<NUM_INSTR_SOURCES; i++) {
+                    fprintf(out, "0x%llx\n", curr_instr.source_memory[i]);
+                }
+            }
+#endif
         }
         else
         {
@@ -312,6 +340,8 @@ void MemoryWrite(VOID* addr, UINT32 index)
 VOID Instruction(INS ins, VOID *v)
 {
     // begin each instruction with this function
+	std::cout << INS_Category(ins) << endl;
+
     UINT32 opcode = INS_Opcode(ins);
     INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)BeginInstruction, IARG_INST_PTR, IARG_UINT32, opcode, IARG_END);
 
