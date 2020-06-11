@@ -26,6 +26,7 @@
 #define BRANCH_OTHER         7
 
 #include "set.h"
+#include <unordered_map>
 
 class input_instr {
   public:
@@ -168,6 +169,10 @@ class ooo_model_instr {
     uint32_t lq_index[NUM_INSTR_SOURCES],
              sq_index[NUM_INSTR_DESTINATIONS_SPARC],
              forwarding_index[NUM_INSTR_DESTINATIONS_SPARC];
+
+    // Mark if this instruction is using value prediction
+    uint8_t is_speculative;
+    uint8_t value_mispredicted;
 
     ooo_model_instr() {
         instr_id = 0;
