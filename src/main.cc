@@ -556,6 +556,7 @@ int main(int argc, char **argv)
                 {"cloudsuite", no_argument, 0, 'c'},
                 {"low_bandwidth", no_argument, 0, 'b'},
                 {"traces", no_argument, 0, 't'},
+                {"trace_values", no_argument, 0, 'tv'},
                 {0, 0, 0, 0}};
 
         int option_index = 0;
@@ -566,6 +567,7 @@ int main(int argc, char **argv)
         if (c == -1)
             break;
 
+        int trace_values_encountered = 0;
         int traces_encountered = 0;
 
         switch (c)
@@ -585,6 +587,9 @@ int main(int argc, char **argv)
             break;
         case 'b':
             knob_low_bandwidth = 1;
+            break;
+        case 'tv':
+            trace_values_encountered = 1;
             break;
         case 't':
             traces_encountered = 1;
@@ -628,6 +633,7 @@ int main(int argc, char **argv)
     // search through the argv for "-traces"
     int found_traces = 0;
     int count_traces = 0;
+    int found_trace_values = 0;
     cout << endl;
     for (int i = 0; i < argc; i++)
     {
@@ -695,6 +701,12 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "-traces") == 0)
         {
             found_traces = 1;
+        }
+        else if (strcmp(argv[i], "-trace_values") == 0)
+        {
+            found_trace_values = 1;
+            std::cout << "Found trace values file " << argv[i+1] << std::endl;
+            cvp_values_fp = fopen(argv[i+1], "rb");
         }
     }
 
@@ -810,7 +822,6 @@ int main(int argc, char **argv)
 
     mem_fp = fopen("Champsim_Mem_PC.txt", "w");
     instr_fp = fopen("Champsim_Instr_Type.txt", "w");
-    cvp_values_fp = fopen("trace_values.out", "rb");
 
     // simulation entry point
     start_time = time(NULL);
@@ -1001,6 +1012,9 @@ int main(int argc, char **argv)
         cout << "Major fault: " << major_fault[i] << " Minor fault: " << minor_fault[i] << endl;
 
         cout << "Value Predictor Statistics " << endl;
+        cout << "Number of instructions eligible for vp " << ooo_cpu[i].num_instr_eligible_vp << endl;
+        cout << "Number of instructions for vp speculation " << ooo_cpu[i].num_instr_speculate_vp << endl;
+        cout << "Number of RAW dependencies " << ooo_cpu[i].num_raw_dependencies << endl;
         cout << "Number of Memory Operations Predicted Correct " << ooo_cpu[i].vp_correct_mem_executions << endl;
         cout << "Number of Memory Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions << endl;
         cout << "Number of ALU Operations Predicted Correct " << ooo_cpu[i].vp_correct_reg_executions << endl;
@@ -1024,7 +1038,9 @@ int main(int argc, char **argv)
 
     fclose(mem_fp);
     fclose(instr_fp);
-    fclose(cvp_values_fp);
+
+    if (found_trace_values)
+        fclose(cvp_values_fp);
 
     return 0;
 }

@@ -2,7 +2,7 @@
 
 if [ "$#" -lt 4 ]; then
     echo "Illegal number of parameters"
-    echo "Usage: ./run_champsim.sh [BINARY] [N_WARM] [N_SIM] [TRACE] [OPTION]"
+    echo "Usage: ./run_champsim.sh [BINARY] [N_WARM] [N_SIM] [TRACE] [TRACE_VALUES] [ENABLE_GDB] [OPTION]"
     exit 1
 fi
 
@@ -12,8 +12,9 @@ BINARY=${1}
 N_WARM=${2}
 N_SIM=${3}
 TRACE=${4}
-USE_GDB=${5:-false}
-OPTION=${6}
+TRACE_VALUES=${5}
+USE_GDB=${6:-false}
+OPTION=${7}
 
 # Sanity check
 if [ -z $TRACE_DIR ] || [ ! -d "$TRACE_DIR" ] ; then
@@ -43,11 +44,16 @@ if [ ! -f "$TRACE_DIR/$TRACE" ] ; then
     exit 1
 fi
 
+if [ ! -f "$TRACE_DIR/$TRACE_VALUES" ] ; then
+    echo "[ERROR] Cannot find a trace file: $TRACE_DIR/$TRACE_VALUES"
+    exit 1
+fi
+
 mkdir -p results_${N_SIM}M
 
 if [ $USE_GDB = false ]
 then
-	(./bin/${BINARY} -warmup_instructions ${N_WARM}000000 -simulation_instructions ${N_SIM}000000 ${OPTION} -traces ${TRACE_DIR}/${TRACE}) &> results_${N_SIM}M/${TRACE}-${BINARY}${OPTION}.txt
+	(./bin/${BINARY} -warmup_instructions ${N_WARM}000000 -simulation_instructions ${N_SIM}000000 ${OPTION} -trace_values ${TRACE_DIR}/${TRACE_VALUES} -traces ${TRACE_DIR}/${TRACE}) &> results_${N_SIM}M/${TRACE}-${BINARY}${OPTION}.txt
 else
-	gdb --args ./bin/${BINARY} -warmup_instructions ${N_WARM}000000 -simulation_instructions ${N_SIM}000000 ${OPTION} -traces ${TRACE_DIR}/${TRACE}
+	gdb --args ./bin/${BINARY} -warmup_instructions ${N_WARM}000000 -simulation_instructions ${N_SIM}000000 ${OPTION} -trace_values ${TRACE_DIR}/${TRACE_VALUES} -traces ${TRACE_DIR}/${TRACE}
 fi

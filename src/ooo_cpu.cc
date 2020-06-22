@@ -400,7 +400,8 @@ void O3_CPU::read_from_trace()
 
                 // CVP calls getPrediction irrespective of the instruction type
                 bool speculate = getPrediction(arch_instr.instr_id, arch_instr.ip, 0, predicted_value);
-
+                if (speculate)
+                    num_instr_speculate_vp++;
                 switch (arch_instr.destination_registers[0]) {
                     case 0: // implies not updating any register.
                     case REG_STACK_POINTER: // special purpose; not predicting control-flow 
@@ -420,8 +421,9 @@ void O3_CPU::read_from_trace()
                                 (arch_instr.is_memory && arch_instr.destination_memory[0]) ? InstClass::storeInstClass :
                                                                                                 InstClass::aluInstClass;
                         // make memory instructions also ineligible for now - remove the 3rd condition later
-                        eligible = (!arch_instr.is_branch && arch_instr.destination_registers[0] != 64
-                                            && !arch_instr.is_memory) ? true : false;
+                        eligible = (!arch_instr.is_branch && arch_instr.destination_registers[0] != 64) ? true : false;
+                        if (eligible)
+                            num_instr_eligible_vp++;
 
                         if (eligible && speculate) {
                             // read the actual value from the trace
@@ -433,26 +435,29 @@ void O3_CPU::read_from_trace()
                                     if (elem.first == arch_instr.destination_registers[0]) {
                                         prediction_result = elem.second == predicted_value;
                                         if (!prediction_result) {
-                                            //if(warmup_complete[cpu]) {
+                                            if(warmup_complete[cpu]) {
                                                 fetch_stall = 1;
                                                 arch_instr.value_mispredicted = 1;
                                                 continue_reading = 0;
                                                 fetch_resume_cycle = 0;
-                                                std::cout << "Stall for " << arch_instr.ip << " due to value misprediction at " <<
-                                                            current_core_cycle[cpu] << " cycles" << std::endl;
-                                                if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass)
+                                                if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass) {
                                                     vp_incorrect_mem_executions++;
-                                                else
+                                                    std::cout << "Stall for " << arch_instr.ip << " due to Memory value misprediction at " <<
+                                                                current_core_cycle[cpu] << " cycles" << std::endl;
+                                                } else {
+                                                    std::cout << "Stall for " << arch_instr.ip << " due to ALU value misprediction at " <<
+                                                                current_core_cycle[cpu] << " cycles" << std::endl;                                                    
                                                     vp_incorrect_reg_executions++;                                                            
-                                            //}
+                                                }
+                                            }
                                         } else {
-                                            //if(warmup_complete[cpu]) {
+                                            if(warmup_complete[cpu]) {
                                                 arch_instr.value_mispredicted = 0;
                                                 if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass)
                                                     vp_correct_mem_executions++;
                                                 else
                                                     vp_correct_reg_executions++;
-                                            //}
+                                            }
                                         }
                                     }
                                 }
@@ -1045,6 +1050,8 @@ void O3_CPU::do_scheduling(uint32_t rob_index)
     ROB.entry[rob_index].reg_ready = 1; // reg_ready will be reset to 0 if there is RAW dependency
 
     reg_dependency(rob_index);
+    if (!ROB.entry[rob_index].reg_ready)
+        num_raw_dependencies++;
     ROB.next_schedule = (rob_index == (ROB.SIZE - 1)) ? 0 : (rob_index + 1);
 
     if (ROB.entry[rob_index].is_memory)
@@ -2030,6 +2037,11 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 if (ROB.entry[rob_index].branch_mispredicted)
                 {
                     fetch_resume_cycle = current_core_cycle[cpu] + BRANCH_MISPREDICT_PENALTY;
+                }
+
+                if (ROB.entry[rob_index].value_mispredicted && ROB.entry[rob_index].is_speculative)
+                {
+                    fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
                 }
 
                 DP(if (warmup_complete[cpu]) {

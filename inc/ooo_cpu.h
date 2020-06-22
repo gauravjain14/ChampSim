@@ -61,6 +61,9 @@ public:
   uint32_t next_ITLB_fetch;
 
   // value prediction
+  uint32_t num_raw_dependencies;
+  uint32_t num_instr_eligible_vp = 0;
+  uint32_t num_instr_speculate_vp = 0;  
   uint32_t vp_correct_reg_executions; // > 4billion instructions?
   uint32_t vp_correct_mem_executions;
   uint32_t vp_incorrect_reg_executions;
@@ -138,6 +141,9 @@ public:
     next_ITLB_fetch = 0;
 
     // value prediction
+    num_raw_dependencies = 0;
+    num_instr_eligible_vp = 0;
+    num_instr_speculate_vp = 0;
     vp_correct_reg_executions = 0;
     vp_incorrect_reg_executions = 0;
     vp_correct_mem_executions = 0;
