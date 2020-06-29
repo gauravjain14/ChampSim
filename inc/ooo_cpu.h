@@ -68,6 +68,7 @@ public:
   uint32_t vp_correct_mem_executions;
   uint32_t vp_incorrect_reg_executions;
   uint32_t vp_incorrect_mem_executions;
+  uint32_t num_instr_type_mismatch;
 
   // reorder buffer, load/store queue, register file
   CORE_BUFFER IFETCH_BUFFER{"IFETCH_BUFFER", FETCH_WIDTH * 2};
@@ -148,6 +149,7 @@ public:
     vp_incorrect_reg_executions = 0;
     vp_correct_mem_executions = 0;
     vp_incorrect_mem_executions = 0;
+    num_instr_type_mismatch = 0;
 
     // branch
     branch_mispredict_stall_fetch = 0;
@@ -253,8 +255,9 @@ public:
   void l1i_prefetcher_final_stats();
   int prefetch_code_line(uint64_t pf_v_addr);
 
-  // value prefetching
+  // value prediction
   std::unordered_map<uint64_t, std::vector<std::pair<uint8_t, uint64_t>>> instrOutValues;
+  std::unordered_map<uint64_t, uint8_t> instrTypesCvp; // This is sanity check between CVP and ChampSim
   void read_reg_values(FILE *fp);
 };
 

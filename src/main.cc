@@ -1012,6 +1012,7 @@ int main(int argc, char **argv)
         cout << "Major fault: " << major_fault[i] << " Minor fault: " << minor_fault[i] << endl;
 
         cout << "Value Predictor Statistics " << endl;
+        cout << "Number of instruction type mismatches " << ooo_cpu[i].num_instr_type_mismatch << endl;
         cout << "Number of instructions eligible for vp " << ooo_cpu[i].num_instr_eligible_vp << endl;
         cout << "Number of instructions for vp speculation " << ooo_cpu[i].num_instr_speculate_vp << endl;
         cout << "Number of RAW dependencies " << ooo_cpu[i].num_raw_dependencies << endl;

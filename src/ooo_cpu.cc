@@ -12,13 +12,18 @@ void O3_CPU::initialize_core()
 
 void O3_CPU::read_reg_values(FILE *fp) {
     uint64_t instr_ip;
+    uint8_t instr_type;
     uint8_t instr_numOutRegs;
     uint8_t regName;
     uint64_t regValue;
     
     std::vector<std::pair<uint8_t,uint64_t>> regValueVector;
     fread(&instr_ip, sizeof(instr_ip), 1, cvp_values_fp);
+    fread(&instr_type, sizeof(instr_type), 1, cvp_values_fp);
     fread(&instr_numOutRegs, sizeof(instr_numOutRegs), 1, cvp_values_fp);
+
+    instrTypesCvp[instr_ip] = instr_type;
+
     if (instr_numOutRegs > 0) {
         for (int i=0; i<instr_numOutRegs; i++) {
             fread(&regName, sizeof(regName), 1, cvp_values_fp);
@@ -386,13 +391,32 @@ void O3_CPU::read_from_trace()
                 }
 
                 /* Get output values for this instruction, if any */
-                read_reg_values(cvp_values_fp);
+                if (!feof(cvp_values_fp))
+                    read_reg_values(cvp_values_fp);
 
                 uint64_t predicted_value;
                 uint8_t prediction_result; // 0: incorrect, 1: correct, 2: unknown (not revealed)
                 bool eligible = false;
                 uint64_t next_pc;
-                InstClass insn;
+                
+                //InstClass insn = (InstClass)instrTypesCvp[arch_instr.ip];
+                InstClass insn = (arch_instr.is_branch && arch_instr.branch_type == BRANCH_CONDITIONAL) ? InstClass::condBranchInstClass :
+                                (arch_instr.is_branch && arch_instr.branch_type == BRANCH_DIRECT_JUMP) ? InstClass::uncondDirectBranchInstClass :
+                                (arch_instr.is_branch && arch_instr.branch_type == BRANCH_INDIRECT) ? InstClass::uncondIndirectBranchInstClass :
+                                (arch_instr.is_memory && arch_instr.source_memory[0]) ? InstClass::loadInstClass :
+                                (arch_instr.is_memory && arch_instr.destination_memory[0]) ? InstClass::storeInstClass :
+                                                                                                InstClass::aluInstClass;
+
+                // Not accounting for branch instructions; apart from that fp/slowAluInst instrs are only mismatched
+                //if (!arch_instr.is_branch && 
+                if (insn != (InstClass)instrTypesCvp[arch_instr.ip]
+                        && ((InstClass)instrTypesCvp[arch_instr.ip] != InstClass::fpInstClass &&
+                             (InstClass)instrTypesCvp[arch_instr.ip] != InstClass::slowAluInstClass)){
+                    std::cout << "Instruction mismatch for " << arch_instr.ip << 
+                        " type from trace " << (InstClass)instrTypesCvp[arch_instr.ip] <<
+                                "; type decoded " << insn << std::endl;
+                    num_instr_type_mismatch++;
+                }
 
                 /* This probably includes all ALU and Load instructions because Load will also specify a dest-reg!
                 Assumption1: we only have one destination register for any instruction
@@ -402,6 +426,7 @@ void O3_CPU::read_from_trace()
                 bool speculate = getPrediction(arch_instr.instr_id, arch_instr.ip, 0, predicted_value);
                 if (speculate)
                     num_instr_speculate_vp++;
+
                 switch (arch_instr.destination_registers[0]) {
                     case 0: // implies not updating any register.
                     case REG_STACK_POINTER: // special purpose; not predicting control-flow 
@@ -414,12 +439,6 @@ void O3_CPU::read_from_trace()
                         that as the destination register. But, since CVP doesn't speculate
                         that, so won't we. 
                         */
-                        insn = (arch_instr.is_branch && arch_instr.branch_type == BRANCH_CONDITIONAL) ? InstClass::condBranchInstClass :
-                                (arch_instr.is_branch && arch_instr.branch_type == BRANCH_DIRECT_JUMP) ? InstClass::uncondDirectBranchInstClass :
-                                (arch_instr.is_branch && arch_instr.branch_type == BRANCH_INDIRECT) ? InstClass::uncondIndirectBranchInstClass :
-                                (arch_instr.is_memory && arch_instr.source_memory[0]) ? InstClass::loadInstClass :
-                                (arch_instr.is_memory && arch_instr.destination_memory[0]) ? InstClass::storeInstClass :
-                                                                                                InstClass::aluInstClass;
                         // make memory instructions also ineligible for now - remove the 3rd condition later
                         eligible = (!arch_instr.is_branch && arch_instr.destination_registers[0] != 64) ? true : false;
                         if (eligible)
@@ -473,6 +492,23 @@ void O3_CPU::read_from_trace()
                         arch_instr.is_speculative = eligible && speculate;
                         break;
                 }
+
+                // data values for memory hierarchy
+                /*bool have_instr_data = false;
+                if (insn == InstClass::loadInstClass) {
+                    for (auto elem: instrOutValues[arch_instr.ip]){
+                        if (elem.first == arch_instr.destination_registers[0]){
+                            arch_instr.instr_data = elem.second;
+                            have_instr_data = true;
+                        }
+                    }
+                    if (!have_instr_data)
+                        arch_instr.instr_data = 0xcafedead; // should be unreachable
+                } else if (insn == InstClass::storeInstClass) {
+                    arch_instr.instr_data = 0xcafedead;  // We don't have actual store values, right?
+                }*/
+
+                arch_instr.instr_data = 0xcafedead;
 
                 // add this instruction to the IFETCH_BUFFER
                 if (IFETCH_BUFFER.occupancy < IFETCH_BUFFER.SIZE)
@@ -1066,10 +1102,6 @@ void O3_CPU::do_scheduling(uint32_t rob_index)
         else
             ROB.entry[rob_index].event_cycle += SCHEDULING_LATENCY;
 
-        if (ROB.entry[rob_index].is_speculative && !ROB.entry[rob_index].value_mispredicted) {
-
-        }
-
         /* Don't do this. We want the instruction to go through the execute stage as well. */
         // ADD LATENCY
         /*if (ROB.entry[rob_index].event_cycle < current_core_cycle[cpu])
@@ -1457,6 +1489,7 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
     LQ.entry[lq_index].asid[0] = ROB.entry[rob_index].asid[0];
     LQ.entry[lq_index].asid[1] = ROB.entry[rob_index].asid[1];
     LQ.entry[lq_index].event_cycle = current_core_cycle[cpu] + SCHEDULING_LATENCY;
+    LQ.entry[lq_index].instr_data = ROB.entry[rob_index].instr_data;
     LQ.occupancy++;
 
     // a good place to log memory loads?
@@ -1660,6 +1693,7 @@ void O3_CPU::add_store_queue(uint32_t rob_index, uint32_t data_index)
     SQ.entry[sq_index].asid[0] = ROB.entry[rob_index].asid[0];
     SQ.entry[sq_index].asid[1] = ROB.entry[rob_index].asid[1];
     SQ.entry[sq_index].event_cycle = current_core_cycle[cpu] + SCHEDULING_LATENCY;
+    SQ.entry[sq_index].instr_data = ROB.entry[rob_index].instr_data;
 
     SQ.occupancy++;
     SQ.tail++;
@@ -2337,7 +2371,8 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
             cout << "[ROB] " << __func__ << " load instr_id: " << LQ.entry[lq_index].instr_id;
             cout << " L1D_FETCH_DONE fetched: " << +LQ.entry[lq_index].fetched << hex << " address: " << (LQ.entry[lq_index].physical_address>>LOG2_BLOCK_SIZE);
             cout << " full_addr: " << LQ.entry[lq_index].physical_address << dec << " remain_mem_ops: " << ROB.entry[rob_index].num_mem_ops;
-            cout << " load_merged: " << +queue->entry[index].load_merged << " inflight_mem: " << inflight_mem_executions << endl; });
+            cout << " load_merged: " << +queue->entry[index].load_merged << " inflight_mem: " << inflight_mem_executions << endl;});
+            //cout << " L1D_FETCH_DATA: " << LQ});
 
             release_load_queue(lq_index);
             handle_merged_load(&queue->entry[index]);
@@ -2587,6 +2622,7 @@ void O3_CPU::retire_rob()
                         data_packet.asid[0] = SQ.entry[sq_index].asid[0];
                         data_packet.asid[1] = SQ.entry[sq_index].asid[1];
                         data_packet.event_cycle = current_core_cycle[cpu];
+                        data_packet.data = SQ.entry[sq_index].instr_data;
 
                         L1D.add_wq(&data_packet);
                     }
