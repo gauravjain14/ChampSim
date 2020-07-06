@@ -8,7 +8,7 @@ inc = inc
 
 debug = 1
 #-D DEBUG_PRINT
-CFlags = -Wall -O3 -std=c++11 -g 
+CFlags = -Wall -O3 -std=c++11 -g -D CVP_TRACE# -D CVP_DEBUG_PRINT
 LDFlags =
 libs =
 libDir =

@@ -10,7 +10,7 @@ void O3_CPU::initialize_core()
 {
 }
 
-void O3_CPU::read_reg_values(FILE *fp) {
+void O3_CPU::read_reg_values(FILE *fp, uint64_t ip, uint64_t seqno, bool reset_fp) {
     uint64_t instr_ip;
     uint8_t instr_type;
     uint8_t instr_numOutRegs;
@@ -18,23 +18,39 @@ void O3_CPU::read_reg_values(FILE *fp) {
     uint64_t regValue;
     
     std::vector<std::pair<uint8_t,uint64_t>> regValueVector;
-    fread(&instr_ip, sizeof(instr_ip), 1, cvp_values_fp);
-    fread(&instr_type, sizeof(instr_type), 1, cvp_values_fp);
-    fread(&instr_numOutRegs, sizeof(instr_numOutRegs), 1, cvp_values_fp);
+    fread(&instr_ip, sizeof(instr_ip), 1, fp);
+    fread(&instr_type, sizeof(instr_type), 1, fp);
+    fread(&instr_numOutRegs, sizeof(instr_numOutRegs), 1, fp);
+
+    // another sanity check to say that ip matches with instr_ip
+    if (instr_ip != ip) {
+        std::cerr << "Instr IP being read from trace doesn't match with "
+            "the one being read from trace values;\n Trace " << ip <<
+                " Trace values " << instr_ip << std::endl;
+        assert(instr_ip == ip);
+    }
 
     instrTypesCvp[instr_ip] = instr_type;
 
     if (instr_numOutRegs > 0) {
         for (int i=0; i<instr_numOutRegs; i++) {
-            fread(&regName, sizeof(regName), 1, cvp_values_fp);
-            fread(&regValue, sizeof(regValue), 1, cvp_values_fp);
+            fread(&regName, sizeof(regName), 1, fp);
+            fread(&regValue, sizeof(regValue), 1, fp);
             if (regName != 64) {  // again, RFFLAGS in CVP
                 regValueVector.push_back(std::make_pair(regName, regValue));
             }
         }
         if (regValueVector.size() > 0)
-            instrOutValues[instr_ip] = regValueVector;
-    }        
+            instrOutValues[seqno] = regValueVector;
+            //instrOutValues[instr_ip] = regValueVector;
+    }
+
+    // reset to the start of the file because Champsim
+    // plays the first instruction twice.
+    if (reset_fp) {
+        std::cout << "Reset trace values file" << std::endl;
+        fseek(fp, 0, SEEK_SET);
+    }
 }
 
 void O3_CPU::read_from_trace()
@@ -196,6 +212,8 @@ void O3_CPU::read_from_trace()
                          << "*** CANNOT REOPEN TRACE FILE: " << trace_string << " ***" << endl;
                     assert(0);
                 }
+
+                reset_trace_values_file = true;
             }
             else
             { // successfully read the trace
@@ -222,6 +240,7 @@ void O3_CPU::read_from_trace()
                 arch_instr.asid[0] = cpu;
                 arch_instr.asid[1] = cpu;
 
+#ifndef CVP_TRACE
                 bool reads_sp = false;
                 bool writes_sp = false;
                 bool reads_flags = false;
@@ -261,10 +280,6 @@ void O3_CPU::read_from_trace()
                     if (arch_instr.destination_memory[i])
                     {
                         num_mem_ops++;
-
-                        // write instruction pc for store instruction
-                        //fprintf(mem_fp, "STORE: %#x\n", current_instr.ip);
-                        fprintf(mem_fp, "%#x: %#x\n", current_instr.ip, current_instr.destination_memory[i]);
 
                         // update STA, this structure is required to execute store instructions properly without deadlock
                         if (num_mem_ops > 0)
@@ -309,21 +324,11 @@ void O3_CPU::read_from_trace()
                         break;
                     }
 
-                    /*
-		    if((!arch_instr.is_branch) && (arch_instr.source_registers[i] > 25) && (arch_instr.source_registers[i] < 28))
-		      {
-			arch_instr.source_registers[i] = 0;
-		      }
-		    */
-
                     if (arch_instr.source_registers[i])
                         num_reg_ops++;
                     if (arch_instr.source_memory[i])
                     {
                         num_mem_ops++;
-
-                        // write instruction pc for load instruction
-                        fprintf(mem_fp, "%#x: %#x\n", current_instr.ip, current_instr.source_memory[i]);
                     }
                 }
 
@@ -347,7 +352,7 @@ void O3_CPU::read_from_trace()
                     arch_instr.branch_taken = 1;
                     arch_instr.branch_type = BRANCH_INDIRECT;
                 }
-                else if (!reads_sp && reads_ip && !writes_sp && writes_ip && reads_flags && !reads_other)
+                else if (!reads_sp && reads_ip && !writes_sp && 'writes_ip' && reads_flags && !reads_other)
                 {
                     // conditional branch
                     arch_instr.is_branch = 1;
@@ -383,6 +388,102 @@ void O3_CPU::read_from_trace()
                     arch_instr.branch_type = BRANCH_OTHER;
                 }
 
+#else
+                for (uint32_t i = 0; i < MAX_INSTR_DESTINATIONS; i++)
+                {
+                    arch_instr.destination_registers[i] = current_instr.destination_registers[i];
+                    arch_instr.destination_memory[i] = current_instr.destination_memory[i];
+                    arch_instr.destination_virtual_address[i] = current_instr.destination_memory[i];\
+
+                    if (arch_instr.destination_registers[i])
+                        num_reg_ops++;
+                    if (arch_instr.destination_memory[i])
+                    {
+                        num_mem_ops++;
+
+                        // write instruction pc for store instruction
+                        //fprintf(mem_fp, "STORE: %#x\n", current_instr.ip);
+                        fprintf(mem_fp, "%#x: %#x\n", current_instr.ip, current_instr.destination_memory[i]);
+
+                        // update STA, this structure is required to execute store instructions properly without deadlock
+                        if (num_mem_ops > 0)
+                        {
+#ifdef SANITY_CHECK
+                            if (STA[STA_tail] < UINT64_MAX)
+                            {
+                                if (STA_head != STA_tail)
+                                    assert(0);
+                            }
+#endif
+                            STA[STA_tail] = instr_unique_id;
+                            STA_tail++;
+
+                            if (STA_tail == STA_SIZE)
+                                STA_tail = 0;
+                        }
+                    }
+                }
+
+                for (int i = 0; i < NUM_INSTR_SOURCES; i++)
+                {
+                    arch_instr.source_registers[i] = current_instr.source_registers[i];
+                    arch_instr.source_memory[i] = current_instr.source_memory[i];
+                    arch_instr.source_virtual_address[i] = current_instr.source_memory[i];
+
+                    if (arch_instr.source_registers[i])
+                        num_reg_ops++;
+                    if (arch_instr.source_memory[i])
+                    {
+                        num_mem_ops++;
+
+                        // write instruction pc for load instruction
+                        fprintf(mem_fp, "%#x: %#x\n", current_instr.ip, current_instr.source_memory[i]);
+                    }
+                }
+                arch_instr.num_reg_ops = num_reg_ops;
+                arch_instr.num_mem_ops = num_mem_ops;
+
+                /* Get output values for this instruction, if any
+                The condition for instr_unique_id > 0 is because Champsim
+                puts the first instruction twice through the pipeline*/
+                if (!feof(cvp_values_fp)) {
+                    bool reset_fp = (instr_unique_id == 0) || reset_trace_values_file;
+                    read_reg_values(cvp_values_fp, arch_instr.ip, arch_instr.instr_id, reset_fp);
+                    reset_trace_values_file = false;
+                }
+
+                if ((instrTypesCvp[arch_instr.ip] == InstClass::loadInstClass) ||
+                    (instrTypesCvp[arch_instr.ip] == InstClass::storeInstClass)) {
+                    assert(num_mem_ops > 0 && "Insufficient Memory ops for Mem instr\n");
+                }
+
+                if (num_mem_ops > 0)
+                    arch_instr.is_memory = 1;
+
+                if (current_instr.is_branch) {
+                    arch_instr.is_branch = 1;
+                    arch_instr.branch_taken = current_instr.branch_taken;
+
+                    switch (instrTypesCvp[arch_instr.ip]) {
+                        case InstClass::uncondDirectBranchInstClass:
+                            arch_instr.branch_type = BRANCH_DIRECT_JUMP;
+                            break;
+
+                        case InstClass::uncondIndirectBranchInstClass:
+                            arch_instr.branch_type = BRANCH_INDIRECT;
+                            break;
+
+                        case InstClass::condBranchInstClass:
+                            arch_instr.branch_type = BRANCH_CONDITIONAL;
+                            break;
+
+                        default:
+                            arch_instr.branch_type = BRANCH_OTHER;
+                            break;
+                    }
+                }
+#endif
+
                 total_branch_types[arch_instr.branch_type]++;
 
                 if ((arch_instr.is_branch == 1) && (arch_instr.branch_taken == 1))
@@ -390,31 +491,28 @@ void O3_CPU::read_from_trace()
                     arch_instr.branch_target = next_instr.ip;
                 }
 
-                /* Get output values for this instruction, if any */
-                if (!feof(cvp_values_fp))
-                    read_reg_values(cvp_values_fp);
-
                 uint64_t predicted_value;
                 uint8_t prediction_result; // 0: incorrect, 1: correct, 2: unknown (not revealed)
                 bool eligible = false;
                 uint64_t next_pc;
-                
-                //InstClass insn = (InstClass)instrTypesCvp[arch_instr.ip];
-                InstClass insn = (arch_instr.is_branch && arch_instr.branch_type == BRANCH_CONDITIONAL) ? InstClass::condBranchInstClass :
+
+                InstClass insn = (InstClass)instrTypesCvp[arch_instr.ip];
+                /*InstClass insn = (arch_instr.is_branch && arch_instr.branch_type == BRANCH_CONDITIONAL) ? InstClass::condBranchInstClass :
                                 (arch_instr.is_branch && arch_instr.branch_type == BRANCH_DIRECT_JUMP) ? InstClass::uncondDirectBranchInstClass :
                                 (arch_instr.is_branch && arch_instr.branch_type == BRANCH_INDIRECT) ? InstClass::uncondIndirectBranchInstClass :
                                 (arch_instr.is_memory && arch_instr.source_memory[0]) ? InstClass::loadInstClass :
                                 (arch_instr.is_memory && arch_instr.destination_memory[0]) ? InstClass::storeInstClass :
-                                                                                                InstClass::aluInstClass;
+                                                                                                InstClass::aluInstClass;*/
 
                 // Not accounting for branch instructions; apart from that fp/slowAluInst instrs are only mismatched
-                //if (!arch_instr.is_branch && 
                 if (insn != (InstClass)instrTypesCvp[arch_instr.ip]
                         && ((InstClass)instrTypesCvp[arch_instr.ip] != InstClass::fpInstClass &&
                              (InstClass)instrTypesCvp[arch_instr.ip] != InstClass::slowAluInstClass)){
-                    std::cout << "Instruction mismatch for " << arch_instr.ip << 
+#ifdef CVP_DEBUG_PRINT
+                    std::cout << "Instruction mismatch for " << arch_instr.ip <<
                         " type from trace " << (InstClass)instrTypesCvp[arch_instr.ip] <<
                                 "; type decoded " << insn << std::endl;
+#endif
                     num_instr_type_mismatch++;
                 }
 
@@ -446,11 +544,11 @@ void O3_CPU::read_from_trace()
 
                         if (eligible && speculate) {
                             // read the actual value from the trace
-                            if (instrOutValues.find(arch_instr.ip) != instrOutValues.end()) {
-                                // sanity check that the dest-regs are same
-                                // because there are certain instructions with
-                                // more than one destination registers (say, load)
-                                for (auto elem: instrOutValues[arch_instr.ip]) {
+                            if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end()) {
+                                // sanity check that the dest-regs are same because there are certain
+                                // instructions with more than one destination registers (say, load)
+                                // but we are perhaps ignoring all but the first register
+                                for (auto elem: instrOutValues[arch_instr.instr_id]) {
                                     if (elem.first == arch_instr.destination_registers[0]) {
                                         prediction_result = elem.second == predicted_value;
                                         if (!prediction_result) {
@@ -461,11 +559,15 @@ void O3_CPU::read_from_trace()
                                                 fetch_resume_cycle = 0;
                                                 if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass) {
                                                     vp_incorrect_mem_executions++;
+#ifdef CVP_DEBUG_PRINT
                                                     std::cout << "Stall for " << arch_instr.ip << " due to Memory value misprediction at " <<
                                                                 current_core_cycle[cpu] << " cycles" << std::endl;
+#endif
                                                 } else {
+#ifdef CVP_DEBUG_PRINT
                                                     std::cout << "Stall for " << arch_instr.ip << " due to ALU value misprediction at " <<
                                                                 current_core_cycle[cpu] << " cycles" << std::endl;                                                    
+#endif
                                                     vp_incorrect_reg_executions++;                                                            
                                                 }
                                             }
@@ -1224,6 +1326,13 @@ void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t sourc
             cout << " RAW reg_index: " << +ROB.entry[current].source_registers[source_index];
             cout << " producer_id: " << ROB.entry[prior].instr_id << endl; });
 
+#ifdef CVP_DEBUG_PRINT
+            if (ROB.entry[current].is_branch) {
+                printf(" Branch PC %#x type: %d is dependent on %#x for Reg %d\n",
+                    ROB.entry[current].ip,instrTypesCvp[ROB.entry[current].ip],
+                    ROB.entry[prior].ip, ROB.entry[current].source_registers[source_index]);
+            }
+#endif
             return;
         }
     }
@@ -2677,9 +2786,9 @@ void O3_CPU::retire_rob()
     
         /* Okay, this is a bit tricky. How to handle cases with 
         multiple destination registers? We'll get to  it soon. */
-        if (instrOutValues.find(ROB.entry[ROB.head].ip) != instrOutValues.end()) {
+        if (instrOutValues.find(ROB.entry[ROB.head].instr_id) != instrOutValues.end()) {
             updatePredictor(ROB.entry[ROB.head].instr_id, 0xdeadbeef,
-                        instrOutValues[ROB.entry[ROB.head].ip][0].second,
+                        instrOutValues[ROB.entry[ROB.head].instr_id][0].second,
                             0); // send actual execution latency here instead of 0
         }
 
