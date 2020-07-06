@@ -131,3 +131,25 @@ ChampSim measures the IPC (Instruction Per Cycle) value as a performance metric.
 There are some other useful metrics printed out at the end of simulation. <br>
 
 Good luck and be a champion! <br>
+
+# Update: for CVP and Champsim
+
+To use CVP traces in Champsim, convert the CVP traces using the cvp_champsim_trace_converter.
+That creates two files - A **trace.out** file and a **trace_values.out** file. The **trace.out** file has to be
+converted to **trace.out.xz** using `xz -k trace.out`. Then, to make sure that Champsim can be used
+for both **CVP** and **non-CVP** traces, there is a MACRO `CVP_TRACE` that should be passed during
+compilation. 
+
+Look at the `Makefile` for an example. 
+
+Further, if you want to enable printing for CVP-related changes, enable `CVP_DEBUG_PRINT` and you are golden.
+
+`run_champsim.sh` has also been updated to allow passing of additional options to enable `gdb` debugging.
+
+Hence, an example command line would like as follows:
+
+```
+./run_champsim.sh bimodal-no-no-no-no-lru-1core 1 10 trace_compute_int_0.out.xz trace_values_compute_int_0.out false
+```
+
+which would create a results file in `results_10M/trace_compute_int_0.out.xz-bimodal-no-no-no-no-lru-1core.txt`

@@ -1,3 +1,4 @@
+/*
 #include <stdlib.h>
 #include <iostream>
 
@@ -18,6 +19,7 @@ static uint64_t addrHist = 0;
 
 bool getPrediction(uint64_t seq_no, uint64_t pc, uint8_t piece, uint64_t &predicted_value)
 {
+  getPredictionCount++;
   predictor.choice = -1;
   // Accessing the first table. A different entry will be accessed for each piece.
   // Instructions are 4-bytes, so shift PC by 2.
@@ -76,6 +78,8 @@ void speculativeUpdate(uint64_t seq_no,           // dynamic micro-instruction #
                        uint64_t src3,
                        uint64_t dst)
 {
+  speculativeUpdateCount++;
+
   // In this example, we will only attempt to predict ALU/LOAD/SLOWALU
   // NOT BEING USED ANYWHERE
   // bool isPredictable = insn == aluInstClass || insn == loadInstClass || insn == slowAluInstClass;
@@ -89,14 +93,14 @@ void speculativeUpdate(uint64_t seq_no,           // dynamic micro-instruction #
   // prediction is unknown to be correct or incorrect
   if (eligible)
   {
-    /*        if(prediction_result == 0) {
-            printf("Choice %i PC 0x%lx sli %lu seqno %lu wrong\n", predictor.choice, firstLevelIndex, secondLevelIndex, seq_no);
-            printf("History %lu %lu %lu %lu\n",
-                    predictor.firstLevelTable[firstLevelIndex].fetchHistory[0],
-                    predictor.firstLevelTable[firstLevelIndex].fetchHistory[1],
-                    predictor.firstLevelTable[firstLevelIndex].fetchHistory[2],
-                    predictor.firstLevelTable[firstLevelIndex].fetchHistory[3]);
-        }*/
+    //        if(prediction_result == 0) {
+    //        printf("Choice %i PC 0x%lx sli %lu seqno %lu wrong\n", predictor.choice, firstLevelIndex, secondLevelIndex, seq_no);
+    //        printf("History %lu %lu %lu %lu\n",
+    //                predictor.firstLevelTable[firstLevelIndex].fetchHistory[0],
+    //                predictor.firstLevelTable[firstLevelIndex].fetchHistory[1],
+    //                predictor.firstLevelTable[firstLevelIndex].fetchHistory[2],
+    //                predictor.firstLevelTable[firstLevelIndex].fetchHistory[3]);
+    //    }
 
     predictor.inflightPreds.push_front({seq_no, firstLevelIndex, secondLevelIndex, secondLevelTag});
     predictor.firstLevelTable[firstLevelIndex].inflight++;
@@ -130,6 +134,8 @@ void updatePredictor(uint64_t seq_no,       // dynamic micro-instruction #
                      uint64_t actual_value, // value of destination register (0xdeadbeef if instr. is not eligible for value prediction)
                      uint64_t actual_latency)
 { // actual execution latency of instruction
+
+  updatePredictorCount++;
 
   std::deque<MyPredictor::InflightInfo> &inflight = predictor.inflightPreds;
 
@@ -232,3 +238,4 @@ void endPredictor()
   printf("CONTESTANT OUTPUT--------------------------\n");
   printf("--------------------------\n");
 }
+*/

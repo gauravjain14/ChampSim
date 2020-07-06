@@ -10,6 +10,7 @@
 // make it a member of the O3_CPU class if you want to log per-CPU instr PC
 FILE *mem_fp, *instr_fp;
 FILE *cvp_values_fp;
+FILE *vp_eligible_speculate_fp;
 
 uint8_t warmup_complete[NUM_CPUS],
     simulation_complete[NUM_CPUS],
@@ -22,6 +23,12 @@ uint8_t warmup_complete[NUM_CPUS],
 uint64_t warmup_instructions = 1000000,
          simulation_instructions = 10000000,
          champsim_seed;
+
+// stats to count the number of times each function is called
+uint32_t getPredictionCount;
+uint32_t speculativeUpdateCount;
+uint32_t updatePredictorCount;
+uint32_t dontUpdatePredictor;
 
 time_t start_time;
 
@@ -535,6 +542,11 @@ int main(int argc, char **argv)
     sigIntHandler.sa_flags = 0;
     sigaction(SIGINT, &sigIntHandler, NULL);
 
+    getPredictionCount = 0;
+    speculativeUpdateCount = 0;
+    updatePredictorCount = 0;
+    dontUpdatePredictor = 0;
+
     cout << endl
          << "*** ChampSim Multicore Out-of-Order Simulator ***" << endl
          << endl;
@@ -1011,22 +1023,41 @@ int main(int argc, char **argv)
         print_roi_stats(i, &uncore.LLC);
         cout << "Major fault: " << major_fault[i] << " Minor fault: " << minor_fault[i] << endl;
 
+#ifdef CVP_TRACE
         cout << "Value Predictor Statistics " << endl;
+        endPredictor();
         cout << "Number of instruction type mismatches " << ooo_cpu[i].num_instr_type_mismatch << endl;
         cout << "Number of instructions eligible for vp " << ooo_cpu[i].num_instr_eligible_vp << endl;
         cout << "Number of instructions for vp speculation " << ooo_cpu[i].num_instr_speculate_vp << endl;
+        cout << "Number of critical instructions " << ooo_cpu[i].num_instr_critical_vp << endl;
         cout << "Number of RAW dependencies " << ooo_cpu[i].num_raw_dependencies << endl;
+        cout << "Number of times getPrediction is called " << getPredictionCount << endl;
+        cout << "Number of times speculativeUpdateCount is called " << speculativeUpdateCount << endl;
+        cout << "Number of times updatePredictorCount is called " << updatePredictorCount << endl;
+        cout << "Number of times didn't call updatePredictorCount " << dontUpdatePredictor << endl;
+        cout << "Number of entries in instrOutValues " << ooo_cpu[i].instrOutValues.size() << endl;
         cout << "Number of Memory Operations Predicted Correct " << ooo_cpu[i].vp_correct_mem_executions << endl;
         cout << "Number of Memory Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions << endl;
         cout << "Number of ALU Operations Predicted Correct " << ooo_cpu[i].vp_correct_reg_executions << endl;
         cout << "Number of ALU Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_reg_executions << endl;
-    }
+        cout << "Number of Instructions Predicted Correct " << ooo_cpu[i].vp_correct_mem_executions +
+                                                            ooo_cpu[i].vp_correct_reg_executions << std::endl;
+        cout << "Number of Instructions Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions +
+                                                            ooo_cpu[i].vp_incorrect_reg_executions << std::endl;
 
-    for (uint32_t i = 0; i < NUM_CPUS; i++)
-    {
-        ooo_cpu[i].l1i_prefetcher_final_stats();
-        ooo_cpu[i].L1D.l1d_prefetcher_final_stats();
-        ooo_cpu[i].L2C.l2c_prefetcher_final_stats();
+
+        cout << "VP Distribution : Load " << ooo_cpu[i].vp_load << " Store " << ooo_cpu[i].vp_store
+                << " ALU " << ooo_cpu[i].vp_alu << " Branch " << ooo_cpu[i].vp_branch << endl;
+#ifdef CVP_DEBUG_PRINT
+        vp_eligible_speculate_fp = fopen("VP_Eligible_Speculate.txt", "w");
+        if (vp_eligible_speculate_fp != NULL) {
+            for (const auto &elem: ooo_cpu[i].eligible_speculate_type) {
+                fprintf(vp_eligible_speculate_fp,"PC: %d Instr Type: %d\n",elem.first,elem.second);
+            }
+        }
+        fclose(vp_eligible_speculate_fp);
+#endif
+#endif
     }
 
     uncore.LLC.llc_prefetcher_final_stats();
@@ -1038,7 +1069,7 @@ int main(int argc, char **argv)
 #endif
 
     fclose(mem_fp);
-    fclose(instr_fp);
+    fclose(instr_fp);        
 
     if (found_trace_values)
         fclose(cvp_values_fp);

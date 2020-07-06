@@ -61,6 +61,7 @@ public:
   uint32_t next_ITLB_fetch;
 
   // value prediction
+  bool reset_trace_values_file;
   uint32_t num_raw_dependencies;
   uint32_t num_instr_eligible_vp = 0;
   uint32_t num_instr_speculate_vp = 0;  
@@ -69,6 +70,16 @@ public:
   uint32_t vp_incorrect_reg_executions;
   uint32_t vp_incorrect_mem_executions;
   uint32_t num_instr_type_mismatch;
+  std::unordered_map<uint8_t, uint32_t> vp_instr_type_pred_count;
+  std::vector<std::pair<uint64_t,uint8_t>> eligible_speculate_type;
+
+  uint32_t num_instr_critical_vp = 0;   // FVPChange
+
+  // Distribution of VP instructions
+  uint32_t vp_load = 0;
+  uint32_t vp_store = 0;
+  uint32_t vp_branch = 0;
+  uint32_t vp_alu = 0;  
 
   // reorder buffer, load/store queue, register file
   CORE_BUFFER IFETCH_BUFFER{"IFETCH_BUFFER", FETCH_WIDTH * 2};
@@ -142,6 +153,7 @@ public:
     next_ITLB_fetch = 0;
 
     // value prediction
+    reset_trace_values_file = false;
     num_raw_dependencies = 0;
     num_instr_eligible_vp = 0;
     num_instr_speculate_vp = 0;
@@ -258,7 +270,8 @@ public:
   // value prediction
   std::unordered_map<uint64_t, std::vector<std::pair<uint8_t, uint64_t>>> instrOutValues;
   std::unordered_map<uint64_t, uint8_t> instrTypesCvp; // This is sanity check between CVP and ChampSim
-  void read_reg_values(FILE *fp);
+  std::unordered_map<uint64_t, uint64_t> instrSeqWithPC;
+  void read_reg_values(FILE *fp, uint64_t ip, uint64_t seqno, bool reset_fp, uint8_t *outRegs);
 };
 
 extern O3_CPU ooo_cpu[NUM_CPUS];

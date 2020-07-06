@@ -35,6 +35,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // ...
 // if (insn == InstClass::aluInstClass) ...
 
+#define _CVP_H
+
 enum InstClass : uint8_t
 {
   aluInstClass = 0,
@@ -48,6 +50,10 @@ enum InstClass : uint8_t
   undefInstClass = 8 
 };
 
+// stats to count the number of times each function is called
+extern uint32_t getPredictionCount;
+extern uint32_t speculativeUpdateCount;
+extern uint32_t updatePredictorCount;
 
 //
 // getPrediction()
@@ -125,8 +131,8 @@ extern
 void updatePredictor(uint64_t seq_no,		// dynamic micro-instruction #
 		     uint64_t actual_addr,	// load or store address (0xdeadbeef if not a load or store instruction)
 		     uint64_t actual_value,	// value of destination register (0xdeadbeef if instr. is not eligible for value prediction)
-		     uint64_t actual_latency);	// actual execution latency of instruction
-
+		     uint64_t actual_latency,	// actual execution latency of instruction
+			 bool critical);			// FVPChange
 //
 // beginPredictor()
 // 
@@ -146,3 +152,17 @@ void beginPredictor(int argc_other, char **argv_other);
 //
 extern
 void endPredictor();
+
+// Additional functions for Focused VP ---> FVPChange
+
+bool addToCIT(uint64_t pc);
+bool checkLT(uint64_t pc);
+bool checkVT(uint64_t pc, uint8_t index);
+bool getFromCIT(uint64_t pc);
+void addToLT(uint8_t src_reg);
+void addToLT(uint64_t pc, InstClass type, uint8_t *source_registers, uint32_t num_src_regs);
+//void updateVT(uint64_t pc, uint64_t actual_value);
+bool migrateCITtoVT(uint8_t citIdx, bool eligible, uint64_t actual_value);
+bool migrateLTtoVT(uint64_t pc, uint64_t seq_no, bool eligible, uint64_t actual_value);
+void addParentsToLT(uint64_t src1, uint64_t src2, uint64_t src3);
+int rand16();

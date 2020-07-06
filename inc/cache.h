@@ -3,7 +3,8 @@
 
 #include "memory_class.h"
 #include "cvp.h"
-#include "cvp_default_predictor.h"
+//#include "cvp_default_predictor.h"       
+#include "focused_vp.h"     // FVPChange
 
 // PAGE
 extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
