@@ -1014,11 +1014,13 @@ int main(int argc, char **argv)
         cout << "Value Predictor Statistics " << endl;
         cout << "Number of instructions eligible for vp " << ooo_cpu[i].num_instr_eligible_vp << endl;
         cout << "Number of instructions for vp speculation " << ooo_cpu[i].num_instr_speculate_vp << endl;
+        cout << "Number of critical instructions " << ooo_cpu[i].num_instr_critical_vp << endl;
         cout << "Number of RAW dependencies " << ooo_cpu[i].num_raw_dependencies << endl;
         cout << "Number of Memory Operations Predicted Correct " << ooo_cpu[i].vp_correct_mem_executions << endl;
         cout << "Number of Memory Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions << endl;
         cout << "Number of ALU Operations Predicted Correct " << ooo_cpu[i].vp_correct_reg_executions << endl;
         cout << "Number of ALU Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_reg_executions << endl;
+        cout << "VP Distribution : Load " << ooo_cpu[i].vp_load << " Store " << ooo_cpu[i].vp_store << " ALU " << ooo_cpu[i].vp_alu << " Branch " << ooo_cpu[i].vp_branch << endl;
     }
 
     for (uint32_t i = 0; i < NUM_CPUS; i++)

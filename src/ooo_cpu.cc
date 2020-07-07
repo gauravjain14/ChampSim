@@ -1,5 +1,6 @@
 #include "ooo_cpu.h"
 #include "set.h"
+#include <cstdlib>
 
 // out-of-order core
 O3_CPU ooo_cpu[NUM_CPUS];
@@ -421,7 +422,19 @@ void O3_CPU::read_from_trace()
                                 (arch_instr.is_memory && arch_instr.destination_memory[0]) ? InstClass::storeInstClass :
                                                                                                 InstClass::aluInstClass;
                         // make memory instructions also ineligible for now - remove the 3rd condition later
-                        eligible = (!arch_instr.is_branch && arch_instr.destination_registers[0] != 64) ? true : false;
+                        // eligible = (!arch_instr.is_branch && arch_instr.destination_registers[0] != 64) ? true : false;
+
+                        // VP instructions distribution
+                        if(speculate) {
+                            if(insn == InstClass::loadInstClass) vp_load++;
+                            else if(insn == InstClass::storeInstClass) vp_store++;
+                            else if(insn == InstClass::aluInstClass || insn == InstClass::fpInstClass || insn == InstClass::slowAluInstClass) vp_alu++;
+                            else vp_branch++;
+                        }
+
+                        // For FVP only load instructions will be eligible
+                        eligible = insn == InstClass::loadInstClass;        // FVPChange
+
                         if (eligible)
                             num_instr_eligible_vp++;
 
@@ -464,6 +477,8 @@ void O3_CPU::read_from_trace()
                             } else { // if not present in the trace
                                 prediction_result = 2;
                             }
+                        } else {    // Not predicted
+                            prediction_result = 2; 
                         }
 
                         next_pc = (arch_instr.is_branch && arch_instr.branch_taken) ?
@@ -2014,6 +2029,10 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
             }
 
+            // FVP: Instruction critical if its inside the RETIRE WIDTH at this time
+            ROB.entry[rob_index].is_critical = (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH);       // FVPChange
+            if(ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
+
             DP(if (warmup_complete[cpu]) {
             cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
             cout << " branch_mispredicted: " << +ROB.entry[rob_index].branch_mispredicted << " fetch_stall: " << +fetch_stall;
@@ -2043,6 +2062,10 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 {
                     fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
                 }
+
+                // FVP: Instruction critical if its inside the RETIRE WIDTH at this time
+                ROB.entry[rob_index].is_critical = (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH);       // FVPChange
+                if(ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
 
                 DP(if (warmup_complete[cpu]) {
                 cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
@@ -2641,10 +2664,12 @@ void O3_CPU::retire_rob()
     
         /* Okay, this is a bit tricky. How to handle cases with 
         multiple destination registers? We'll get to  it soon. */
+        //std::cout << "Just before UpdatePredictor" << std::endl;
         if (instrOutValues.find(ROB.entry[ROB.head].ip) != instrOutValues.end()) {
             updatePredictor(ROB.entry[ROB.head].instr_id, 0xdeadbeef,
                         instrOutValues[ROB.entry[ROB.head].ip][0].second,
-                            0); // send actual execution latency here instead of 0
+                            0, // send actual execution latency here instead of 0
+                            ROB.entry[ROB.head].is_critical);
         }
 
         ooo_model_instr empty_entry;
