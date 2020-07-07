@@ -73,6 +73,14 @@ public:
   std::unordered_map<uint8_t, uint32_t> vp_instr_type_pred_count;
   std::vector<std::pair<uint64_t,uint8_t>> eligible_speculate_type;
 
+  uint32_t num_instr_critical_vp = 0;   // FVPChange
+
+  // Distribution of VP instructions
+  uint32_t vp_load = 0;
+  uint32_t vp_store = 0;
+  uint32_t vp_branch = 0;
+  uint32_t vp_alu = 0;  
+
   // reorder buffer, load/store queue, register file
   CORE_BUFFER IFETCH_BUFFER{"IFETCH_BUFFER", FETCH_WIDTH * 2};
   CORE_BUFFER DECODE_BUFFER{"DECODE_BUFFER", DECODE_WIDTH * 3};

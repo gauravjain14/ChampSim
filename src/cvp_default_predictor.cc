@@ -1,3 +1,4 @@
+/*
 #include <stdlib.h>
 #include <iostream>
 
@@ -92,14 +93,14 @@ void speculativeUpdate(uint64_t seq_no,           // dynamic micro-instruction #
   // prediction is unknown to be correct or incorrect
   if (eligible)
   {
-    /*        if(prediction_result == 0) {
-            printf("Choice %i PC 0x%lx sli %lu seqno %lu wrong\n", predictor.choice, firstLevelIndex, secondLevelIndex, seq_no);
-            printf("History %lu %lu %lu %lu\n",
-                    predictor.firstLevelTable[firstLevelIndex].fetchHistory[0],
-                    predictor.firstLevelTable[firstLevelIndex].fetchHistory[1],
-                    predictor.firstLevelTable[firstLevelIndex].fetchHistory[2],
-                    predictor.firstLevelTable[firstLevelIndex].fetchHistory[3]);
-        }*/
+    //        if(prediction_result == 0) {
+    //        printf("Choice %i PC 0x%lx sli %lu seqno %lu wrong\n", predictor.choice, firstLevelIndex, secondLevelIndex, seq_no);
+    //        printf("History %lu %lu %lu %lu\n",
+    //                predictor.firstLevelTable[firstLevelIndex].fetchHistory[0],
+    //                predictor.firstLevelTable[firstLevelIndex].fetchHistory[1],
+    //                predictor.firstLevelTable[firstLevelIndex].fetchHistory[2],
+    //                predictor.firstLevelTable[firstLevelIndex].fetchHistory[3]);
+    //    }
 
     predictor.inflightPreds.push_front({seq_no, firstLevelIndex, secondLevelIndex, secondLevelTag});
     predictor.firstLevelTable[firstLevelIndex].inflight++;
@@ -237,3 +238,4 @@ void endPredictor()
   printf("CONTESTANT OUTPUT--------------------------\n");
   printf("--------------------------\n");
 }
+*/

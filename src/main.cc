@@ -1028,6 +1028,7 @@ int main(int argc, char **argv)
         cout << "Number of instruction type mismatches " << ooo_cpu[i].num_instr_type_mismatch << endl;
         cout << "Number of instructions eligible for vp " << ooo_cpu[i].num_instr_eligible_vp << endl;
         cout << "Number of instructions for vp speculation " << ooo_cpu[i].num_instr_speculate_vp << endl;
+        cout << "Number of critical instructions " << ooo_cpu[i].num_instr_critical_vp << endl;
         cout << "Number of RAW dependencies " << ooo_cpu[i].num_raw_dependencies << endl;
         cout << "Number of times getPrediction is called " << getPredictionCount << endl;
         cout << "Number of times speculativeUpdateCount is called " << speculativeUpdateCount << endl;
@@ -1043,6 +1044,9 @@ int main(int argc, char **argv)
         cout << "Number of Instructions Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions +
                                                             ooo_cpu[i].vp_incorrect_reg_executions << std::endl;
 
+
+        cout << "VP Distribution : Load " << ooo_cpu[i].vp_load << " Store " << ooo_cpu[i].vp_store
+                << " ALU " << ooo_cpu[i].vp_alu << " Branch " << ooo_cpu[i].vp_branch << endl;
 #ifdef CVP_DEBUG_PRINT
         vp_eligible_speculate_fp = fopen("VP_Eligible_Speculate.txt", "w");
         if (vp_eligible_speculate_fp != NULL) {
@@ -1053,13 +1057,6 @@ int main(int argc, char **argv)
         fclose(vp_eligible_speculate_fp);
 #endif
 #endif
-    }
-
-    for (uint32_t i = 0; i < NUM_CPUS; i++)
-    {
-        ooo_cpu[i].l1i_prefetcher_final_stats();
-        ooo_cpu[i].L1D.l1d_prefetcher_final_stats();
-        ooo_cpu[i].L2C.l2c_prefetcher_final_stats();
     }
 
     uncore.LLC.llc_prefetcher_final_stats();

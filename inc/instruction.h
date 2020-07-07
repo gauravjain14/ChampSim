@@ -176,6 +176,9 @@ class ooo_model_instr {
     uint8_t is_speculative;
     uint8_t value_mispredicted;
 
+    // For Focused Value Predictor
+    bool is_critical;  // FVPChange
+
     ooo_model_instr() {
         instr_id = 0;
         ip = 0;
@@ -204,6 +207,8 @@ class ooo_model_instr {
         mem_ready = 0;
         asid[0] = UINT8_MAX;
         asid[1] = UINT8_MAX;
+
+        is_critical = false; // FVPChange
 
 	branch_type = NOT_BRANCH;
 	branch_target = 0;

@@ -1,5 +1,6 @@
 #include "ooo_cpu.h"
 #include "set.h"
+#include <cstdlib>
 
 // out-of-order core
 O3_CPU ooo_cpu[NUM_CPUS];
@@ -460,15 +461,6 @@ void O3_CPU::read_from_trace()
                     read_reg_values(cvp_values_fp, arch_instr.ip, arch_instr.instr_id, reset_fp);
                     reset_trace_values_file = false;
                 }
-
-                /*if (((instrTypesCvp[arch_instr.ip] == InstClass::loadInstClass) ||
-                    (instrTypesCvp[arch_instr.ip] == InstClass::storeInstClass)) &&
-                    !(num_mem_ops <= 0 && (instrOutValues.find(arch_instr.ip) != instrOutValues.end())))
-                {
-                    std::cout << arch_instr.ip << " num mem ops " << num_mem_ops
-                            << " in trace values " << instrOutValues[arch_instr.ip].size() << std::endl;
-                    assert(num_mem_ops > 0 && "Insufficient Memory ops for Mem instr\n");
-                }*/
 
                 if (num_mem_ops > 0)
                     arch_instr.is_memory = 1;
@@ -1409,10 +1401,6 @@ void O3_CPU::execute_instruction()
 
 void O3_CPU::do_execution(uint32_t rob_index)
 {
-    //if (ROB.entry[rob_index].reg_ready && (ROB.entry[rob_index].scheduled == COMPLETED) && (ROB.entry[rob_index].event_cycle <= current_core_cycle[cpu])) {
-
-    //cout << "do_execution() rob_index: " << rob_index << " cycle: " << current_core_cycle[cpu] << endl;
-
     ROB.entry[rob_index].executed = INFLIGHT;
 
     // ADD LATENCY
@@ -2159,6 +2147,10 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
             }
 
+            // FVP: Instruction critical if its inside the RETIRE WIDTH at this time
+            ROB.entry[rob_index].is_critical = (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH);       // FVPChange
+            if(ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
+
             DP(if (warmup_complete[cpu]) {
             cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
             cout << " branch_mispredicted: " << +ROB.entry[rob_index].branch_mispredicted << " fetch_stall: " << +fetch_stall;
@@ -2188,6 +2180,10 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 {
                     fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
                 }
+
+                // FVP: Instruction critical if its inside the RETIRE WIDTH at this time
+                ROB.entry[rob_index].is_critical = (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH);       // FVPChange
+                if(ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
 
                 DP(if (warmup_complete[cpu]) {
                 cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
@@ -2791,7 +2787,7 @@ void O3_CPU::retire_rob()
         if (instrOutValues.find(ROB.entry[ROB.head].instr_id) != instrOutValues.end()) {
             updatePredictor(ROB.entry[ROB.head].instr_id, 0xdeadbeef,
                         instrOutValues[ROB.entry[ROB.head].instr_id][0].second,
-                            0); // send actual execution latency here instead of 0
+                        0, ROB.entry[ROB.head].is_critical); // send actual execution latency here instead of 0
         } else {
             dontUpdatePredictor++;
         }
