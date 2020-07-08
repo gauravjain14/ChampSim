@@ -388,6 +388,13 @@ void O3_CPU::read_from_trace()
                     arch_instr.branch_type = BRANCH_OTHER;
                 }
 
+                total_branch_types[arch_instr.branch_type]++;
+
+                if ((arch_instr.is_branch == 1) && (arch_instr.branch_taken == 1))
+                {
+                    arch_instr.branch_target = next_instr.ip;
+                }
+
 #else
                 for (uint32_t i = 0; i < MAX_INSTR_DESTINATIONS; i++)
                 {
@@ -482,7 +489,6 @@ void O3_CPU::read_from_trace()
                             break;
                     }
                 }
-#endif
 
                 total_branch_types[arch_instr.branch_type]++;
 
@@ -543,6 +549,9 @@ void O3_CPU::read_from_trace()
                             num_instr_eligible_vp++;
 
                         if (eligible && speculate) {
+#ifdef CVP__DEBUG_PRINT
+                            eligible_speculate_type.push_back(std::make_pair(arch_instr.ip,insn));
+#endif
                             // read the actual value from the trace
                             if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end()) {
                                 // sanity check that the dest-regs are same because there are certain
@@ -585,6 +594,8 @@ void O3_CPU::read_from_trace()
                             } else { // if not present in the trace
                                 prediction_result = 2;
                             }
+                        } else {
+                            prediction_result = 2;
                         }
 
                         next_pc = (arch_instr.is_branch && arch_instr.branch_taken) ?
@@ -594,6 +605,7 @@ void O3_CPU::read_from_trace()
                         arch_instr.is_speculative = eligible && speculate;
                         break;
                 }
+#endif
 
                 // data values for memory hierarchy
                 /*bool have_instr_data = false;

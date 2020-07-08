@@ -10,6 +10,7 @@
 // make it a member of the O3_CPU class if you want to log per-CPU instr PC
 FILE *mem_fp, *instr_fp;
 FILE *cvp_values_fp;
+FILE *vp_eligible_speculate_fp;
 
 uint8_t warmup_complete[NUM_CPUS],
     simulation_complete[NUM_CPUS],
@@ -1011,6 +1012,7 @@ int main(int argc, char **argv)
         print_roi_stats(i, &uncore.LLC);
         cout << "Major fault: " << major_fault[i] << " Minor fault: " << minor_fault[i] << endl;
 
+#ifdef CVP_TRACE
         cout << "Value Predictor Statistics " << endl;
         cout << "Number of instruction type mismatches " << ooo_cpu[i].num_instr_type_mismatch << endl;
         cout << "Number of instructions eligible for vp " << ooo_cpu[i].num_instr_eligible_vp << endl;
@@ -1020,6 +1022,17 @@ int main(int argc, char **argv)
         cout << "Number of Memory Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions << endl;
         cout << "Number of ALU Operations Predicted Correct " << ooo_cpu[i].vp_correct_reg_executions << endl;
         cout << "Number of ALU Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_reg_executions << endl;
+
+#ifdef CVP_DEBUG_PRINT
+        vp_eligible_speculate_fp = fopen("VP_Eligible_Speculate.txt", "w");
+        if (vp_eligible_speculate_fp != NULL) {
+            for (const auto &elem: ooo_cpu[i].eligible_speculate_type) {
+                fprintf(vp_eligible_speculate_fp,"PC: %d Instr Type: %d\n",elem.first,elem.second);
+            }
+        }
+        fclose(vp_eligible_speculate_fp);
+#endif
+#endif
     }
 
     for (uint32_t i = 0; i < NUM_CPUS; i++)
@@ -1038,7 +1051,7 @@ int main(int argc, char **argv)
 #endif
 
     fclose(mem_fp);
-    fclose(instr_fp);
+    fclose(instr_fp);        
 
     if (found_trace_values)
         fclose(cvp_values_fp);

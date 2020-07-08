@@ -217,6 +217,9 @@ class ooo_model_instr {
         num_mem_ops = 0;
         num_reg_dependent = 0;
 
+        is_speculative = 0;
+        value_mispredicted = 0;
+
         for (uint32_t i=0; i<NUM_INSTR_SOURCES; i++) {
             source_registers[i] = 0;
             source_memory[i] = 0;

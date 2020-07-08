@@ -71,6 +71,7 @@ public:
   uint32_t vp_incorrect_mem_executions;
   uint32_t num_instr_type_mismatch;
   std::unordered_map<uint8_t, uint32_t> vp_instr_type_pred_count;
+  std::vector<std::pair<uint64_t,uint8_t>> eligible_speculate_type;
 
   // reorder buffer, load/store queue, register file
   CORE_BUFFER IFETCH_BUFFER{"IFETCH_BUFFER", FETCH_WIDTH * 2};
