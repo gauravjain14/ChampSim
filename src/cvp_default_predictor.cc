@@ -18,6 +18,7 @@ static uint64_t addrHist = 0;
 
 bool getPrediction(uint64_t seq_no, uint64_t pc, uint8_t piece, uint64_t &predicted_value)
 {
+  getPredictionCount++;
   predictor.choice = -1;
   // Accessing the first table. A different entry will be accessed for each piece.
   // Instructions are 4-bytes, so shift PC by 2.
@@ -76,6 +77,8 @@ void speculativeUpdate(uint64_t seq_no,           // dynamic micro-instruction #
                        uint64_t src3,
                        uint64_t dst)
 {
+  speculativeUpdateCount++;
+
   // In this example, we will only attempt to predict ALU/LOAD/SLOWALU
   // NOT BEING USED ANYWHERE
   // bool isPredictable = insn == aluInstClass || insn == loadInstClass || insn == slowAluInstClass;
@@ -130,6 +133,8 @@ void updatePredictor(uint64_t seq_no,       // dynamic micro-instruction #
                      uint64_t actual_value, // value of destination register (0xdeadbeef if instr. is not eligible for value prediction)
                      uint64_t actual_latency)
 { // actual execution latency of instruction
+
+  updatePredictorCount++;
 
   std::deque<MyPredictor::InflightInfo> &inflight = predictor.inflightPreds;
 

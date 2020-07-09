@@ -24,6 +24,12 @@ uint64_t warmup_instructions = 1000000,
          simulation_instructions = 10000000,
          champsim_seed;
 
+// stats to count the number of times each function is called
+uint32_t getPredictionCount;
+uint32_t speculativeUpdateCount;
+uint32_t updatePredictorCount;
+uint32_t dontUpdatePredictor;
+
 time_t start_time;
 
 // PAGE TABLE
@@ -536,6 +542,11 @@ int main(int argc, char **argv)
     sigIntHandler.sa_flags = 0;
     sigaction(SIGINT, &sigIntHandler, NULL);
 
+    getPredictionCount = 0;
+    speculativeUpdateCount = 0;
+    updatePredictorCount = 0;
+    dontUpdatePredictor = 0;
+
     cout << endl
          << "*** ChampSim Multicore Out-of-Order Simulator ***" << endl
          << endl;
@@ -1022,6 +1033,11 @@ int main(int argc, char **argv)
         cout << "Number of Memory Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions << endl;
         cout << "Number of ALU Operations Predicted Correct " << ooo_cpu[i].vp_correct_reg_executions << endl;
         cout << "Number of ALU Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_reg_executions << endl;
+        cout << "Number of times getPrediction is called " << getPredictionCount << endl;
+        cout << "Number of times speculativeUpdateCount is called " << speculativeUpdateCount << endl;
+        cout << "Number of times updatePredictorCount is called " << updatePredictorCount << endl;
+        cout << "Number of times didn't call updatePredictorCount " << dontUpdatePredictor << endl;
+        cout << "Number of entries in instrOutValues " << ooo_cpu[i].instrOutValues.size() << endl;
 
 #ifdef CVP_DEBUG_PRINT
         vp_eligible_speculate_fp = fopen("VP_Eligible_Speculate.txt", "w");

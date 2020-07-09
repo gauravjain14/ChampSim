@@ -6,6 +6,8 @@ O3_CPU ooo_cpu[NUM_CPUS];
 uint64_t current_core_cycle[NUM_CPUS], stall_cycle[NUM_CPUS];
 uint32_t SCHEDULING_LATENCY = 0, EXEC_LATENCY = 0, DECODE_LATENCY = 0;
 
+extern uint32_t dontUpdatePredictor;
+
 void O3_CPU::initialize_core()
 {
 }
@@ -531,83 +533,67 @@ void O3_CPU::read_from_trace()
                 if (speculate)
                     num_instr_speculate_vp++;
 
-                switch (arch_instr.destination_registers[0]) {
-                    case 0: // implies not updating any register.
-                    case REG_STACK_POINTER: // special purpose; not predicting control-flow 
-                    case REG_INSTRUCTION_POINTER: // not predicting control flow
-                        eligible = false;
-                        break;
-                    default:
-                        /* In CVP, R64, i.e. 65th register is used for register flags
-                        I am not sure of the scenario where an ALU instruction will have
-                        that as the destination register. But, since CVP doesn't speculate
-                        that, so won't we. 
-                        */
-                        // make memory instructions also ineligible for now - remove the 3rd condition later
-                        eligible = (!arch_instr.is_branch && arch_instr.destination_registers[0] != 64) ? true : false;
-                        if (eligible)
-                            num_instr_eligible_vp++;
+                eligible = (!arch_instr.is_branch && arch_instr.destination_registers[0] != 64) ? true : false;
+                num_instr_eligible_vp += (eligible) ? 1 : 0;
 
-                        if (eligible && speculate) {
+                if (eligible && speculate) {
 #ifdef CVP__DEBUG_PRINT
-                            eligible_speculate_type.push_back(std::make_pair(arch_instr.ip,insn));
+                    eligible_speculate_type.push_back(std::make_pair(arch_instr.ip,insn));
 #endif
-                            // read the actual value from the trace
-                            if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end()) {
-                                // sanity check that the dest-regs are same because there are certain
-                                // instructions with more than one destination registers (say, load)
-                                // but we are perhaps ignoring all but the first register
-                                for (auto elem: instrOutValues[arch_instr.instr_id]) {
-                                    if (elem.first == arch_instr.destination_registers[0]) {
-                                        prediction_result = elem.second == predicted_value;
-                                        if (!prediction_result) {
-                                            if(warmup_complete[cpu]) {
-                                                fetch_stall = 1;
-                                                arch_instr.value_mispredicted = 1;
-                                                continue_reading = 0;
-                                                fetch_resume_cycle = 0;
-                                                if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass) {
-                                                    vp_incorrect_mem_executions++;
+                    // read the actual value from the trace
+                    if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end()) {
+                        // sanity check that the dest-regs are same because there are certain
+                        // instructions with more than one destination registers (say, load)
+                        // but we are perhaps ignoring all but the first register
+                        for (auto elem: instrOutValues[arch_instr.instr_id]) {
+                            if (elem.first == arch_instr.destination_registers[0]) {
+                                prediction_result = elem.second == predicted_value;
+                                if (!prediction_result) {
+                                    if(warmup_complete[cpu]) {
+                                        fetch_stall = 1;
+                                        arch_instr.value_mispredicted = 1;
+                                        continue_reading = 0;
+                                        fetch_resume_cycle = 0;
+                                        if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass) {
+                                            vp_incorrect_mem_executions++;
 #ifdef CVP_DEBUG_PRINT
-                                                    std::cout << "Stall for " << arch_instr.ip << " due to Memory value misprediction at " <<
-                                                                current_core_cycle[cpu] << " cycles" << std::endl;
+                                            std::cout << "Stall for " << arch_instr.ip << " due to Memory value misprediction at " <<
+                                                        current_core_cycle[cpu] << " cycles" << std::endl;
 #endif
-                                                } else {
-#ifdef CVP_DEBUG_PRINT
-                                                    std::cout << "Stall for " << arch_instr.ip << " due to ALU value misprediction at " <<
-                                                                current_core_cycle[cpu] << " cycles" << std::endl;                                                    
-#endif
-                                                    vp_incorrect_reg_executions++;                                                            
-                                                }
-                                            }
                                         } else {
-                                            if(warmup_complete[cpu]) {
-                                                arch_instr.value_mispredicted = 0;
-                                                if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass)
-                                                    vp_correct_mem_executions++;
-                                                else
-                                                    vp_correct_reg_executions++;
-                                            }
+#ifdef CVP_DEBUG_PRINT
+                                            std::cout << "Stall for " << arch_instr.ip << " due to ALU value misprediction at " <<
+                                                        current_core_cycle[cpu] << " cycles" << std::endl;                                                    
+#endif
+                                            vp_incorrect_reg_executions++;                                                            
                                         }
                                     }
+                                } else {
+                                    if(warmup_complete[cpu]) {
+                                        arch_instr.value_mispredicted = 0;
+                                        if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass)
+                                            vp_correct_mem_executions++;
+                                        else
+                                            vp_correct_reg_executions++;
+                                    }
                                 }
-                            } else { // if not present in the trace
-                                prediction_result = 2;
                             }
-                        } else {
-                            prediction_result = 2;
                         }
-
-                        next_pc = (arch_instr.is_branch && arch_instr.branch_taken) ?
-                                            arch_instr.branch_target : arch_instr.ip + 4;
-                        speculativeUpdate(arch_instr.instr_id, eligible, prediction_result,
-                                            arch_instr.ip, next_pc, insn, 0, 0, 0, 0, 0);
-                        arch_instr.is_speculative = eligible && speculate;
-                        break;
+                    } else { // if not present in the trace
+                        prediction_result = 2;
+                    }
+                } else {
+                    prediction_result = 2;
                 }
+
+                next_pc = (arch_instr.is_branch && arch_instr.branch_taken) ?
+                                    arch_instr.branch_target : arch_instr.ip + 4;
+                if (arch_instr.destination_registers[0])
+                    speculativeUpdate(arch_instr.instr_id, eligible, prediction_result,
+                                    arch_instr.ip, next_pc, insn, 0, 0, 0, 0, 0);
+                arch_instr.is_speculative = eligible && speculate;
 #endif
 
-                // data values for memory hierarchy
                 /*bool have_instr_data = false;
                 if (insn == InstClass::loadInstClass) {
                     for (auto elem: instrOutValues[arch_instr.ip]){
@@ -2802,6 +2788,8 @@ void O3_CPU::retire_rob()
             updatePredictor(ROB.entry[ROB.head].instr_id, 0xdeadbeef,
                         instrOutValues[ROB.entry[ROB.head].instr_id][0].second,
                             0); // send actual execution latency here instead of 0
+        } else {
+            dontUpdatePredictor++;
         }
 
         ooo_model_instr empty_entry;

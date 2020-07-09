@@ -48,6 +48,10 @@ enum InstClass : uint8_t
   undefInstClass = 8 
 };
 
+// stats to count the number of times each function is called
+extern uint32_t getPredictionCount;
+extern uint32_t speculativeUpdateCount;
+extern uint32_t updatePredictorCount;
 
 //
 // getPrediction()

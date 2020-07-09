@@ -1,3 +1,6 @@
+#ifndef __CVP_DEFAULT_HH__
+#define __CVP_DEFAULT_HH__
+
 #include <vector>
 #include <deque>
 
@@ -109,3 +112,5 @@ public:
     lastPrediction = 0xdeadbeef;
   }
 };
+
+#endif
