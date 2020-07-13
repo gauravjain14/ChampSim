@@ -1029,15 +1029,19 @@ int main(int argc, char **argv)
         cout << "Number of instructions eligible for vp " << ooo_cpu[i].num_instr_eligible_vp << endl;
         cout << "Number of instructions for vp speculation " << ooo_cpu[i].num_instr_speculate_vp << endl;
         cout << "Number of RAW dependencies " << ooo_cpu[i].num_raw_dependencies << endl;
-        cout << "Number of Memory Operations Predicted Correct " << ooo_cpu[i].vp_correct_mem_executions << endl;
-        cout << "Number of Memory Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions << endl;
-        cout << "Number of ALU Operations Predicted Correct " << ooo_cpu[i].vp_correct_reg_executions << endl;
-        cout << "Number of ALU Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_reg_executions << endl;
         cout << "Number of times getPrediction is called " << getPredictionCount << endl;
         cout << "Number of times speculativeUpdateCount is called " << speculativeUpdateCount << endl;
         cout << "Number of times updatePredictorCount is called " << updatePredictorCount << endl;
         cout << "Number of times didn't call updatePredictorCount " << dontUpdatePredictor << endl;
         cout << "Number of entries in instrOutValues " << ooo_cpu[i].instrOutValues.size() << endl;
+        cout << "Number of Memory Operations Predicted Correct " << ooo_cpu[i].vp_correct_mem_executions << endl;
+        cout << "Number of Memory Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions << endl;
+        cout << "Number of ALU Operations Predicted Correct " << ooo_cpu[i].vp_correct_reg_executions << endl;
+        cout << "Number of ALU Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_reg_executions << endl;
+        cout << "Number of Instructions Predicted Correct " << ooo_cpu[i].vp_correct_mem_executions +
+                                                            ooo_cpu[i].vp_correct_reg_executions << std::endl;
+        cout << "Number of Instructions Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions +
+                                                            ooo_cpu[i].vp_incorrect_reg_executions << std::endl;
 
 #ifdef CVP_DEBUG_PRINT
         vp_eligible_speculate_fp = fopen("VP_Eligible_Speculate.txt", "w");

@@ -461,10 +461,14 @@ void O3_CPU::read_from_trace()
                     reset_trace_values_file = false;
                 }
 
-                if ((instrTypesCvp[arch_instr.ip] == InstClass::loadInstClass) ||
-                    (instrTypesCvp[arch_instr.ip] == InstClass::storeInstClass)) {
+                /*if (((instrTypesCvp[arch_instr.ip] == InstClass::loadInstClass) ||
+                    (instrTypesCvp[arch_instr.ip] == InstClass::storeInstClass)) &&
+                    !(num_mem_ops <= 0 && (instrOutValues.find(arch_instr.ip) != instrOutValues.end())))
+                {
+                    std::cout << arch_instr.ip << " num mem ops " << num_mem_ops
+                            << " in trace values " << instrOutValues[arch_instr.ip].size() << std::endl;
                     assert(num_mem_ops > 0 && "Insufficient Memory ops for Mem instr\n");
-                }
+                }*/
 
                 if (num_mem_ops > 0)
                     arch_instr.is_memory = 1;
