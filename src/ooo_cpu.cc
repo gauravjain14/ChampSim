@@ -537,14 +537,14 @@ void O3_CPU::read_from_trace()
                 if (speculate)
                     num_instr_speculate_vp++;
 
-                eligible = (!arch_instr.is_branch && arch_instr.destination_registers[0] != 64) ? true : false;
+                eligible = (instrTypesCvp[arch_instr.ip] == InstClass::loadInstClass);
                 num_instr_eligible_vp += (eligible) ? 1 : 0;
 
                 if (eligible && speculate) {
-#ifdef CVP__DEBUG_PRINT
+                    // read the actual value from the trace
+#ifdef CVP_DEBUG_PRINT
                     eligible_speculate_type.push_back(std::make_pair(arch_instr.ip,insn));
 #endif
-                    // read the actual value from the trace
                     if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end()) {
                         // sanity check that the dest-regs are same because there are certain
                         // instructions with more than one destination registers (say, load)
