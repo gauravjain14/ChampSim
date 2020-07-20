@@ -31,9 +31,9 @@ struct TraceInfo {
 struct MyPredictor {
 
 	struct CIT_entry {
-		uint64_t tag;
-		uint8_t confidence;
-		uint8_t utility;
+		uint64_t tag : 11;
+		uint8_t confidence : 3;
+		uint8_t utility : 3;
 
 		CIT_entry() : tag(0xdeadbeef), confidence(0), utility(0){}
 		void clear() {
@@ -66,6 +66,13 @@ struct MyPredictor {
 			utility = in_utility;
 			data = in_data;
 			no_predict = in_no_predict;
+		}
+		void clear() {
+			tag = 0xdeadbeef;
+			confidence = 0;
+			utility = 0;
+			data = 0xdeadbeef;
+			no_predict = 0;
 		}
 	};
 

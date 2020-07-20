@@ -529,14 +529,24 @@ void O3_CPU::read_from_trace()
                 if (speculate)
                     num_instr_speculate_vp++;
 
-                eligible = (instrTypesCvp[arch_instr.ip] == InstClass::loadInstClass);
-                num_instr_eligible_vp += (eligible) ? 1 : 0;
+                // VP instructions distribution
+                if(speculate) {
+                    if(insn == InstClass::loadInstClass) vp_load++;
+                    else if(insn == InstClass::storeInstClass) vp_store++;
+                    else if(insn == InstClass::aluInstClass || insn == InstClass::fpInstClass || insn == InstClass::slowAluInstClass) vp_alu++;
+                    else vp_branch++;
+                }
+
+                // For FVP only load instructions will be eligible
+                eligible = insn == InstClass::loadInstClass;        // FVPChange
+
+                num_instr_eligible_vp+= (eligible) ? 1: 0;
 
                 if (eligible && speculate) {
-                    // read the actual value from the trace
-#ifdef CVP_DEBUG_PRINT
+#ifdef CVP__DEBUG_PRINT
                     eligible_speculate_type.push_back(std::make_pair(arch_instr.ip,insn));
 #endif
+                    // read the actual value from the trace
                     if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end()) {
                         // sanity check that the dest-regs are same because there are certain
                         // instructions with more than one destination registers (say, load)
@@ -590,6 +600,7 @@ void O3_CPU::read_from_trace()
                 arch_instr.is_speculative = eligible && speculate;
 #endif
 
+                // data values for memory hierarchy
                 /*bool have_instr_data = false;
                 if (insn == InstClass::loadInstClass) {
                     for (auto elem: instrOutValues[arch_instr.ip]){
@@ -701,6 +712,10 @@ uint32_t O3_CPU::add_to_rob(ooo_model_instr *arch_instr)
         assert(0);
     }
 #endif
+
+    /* When adding to ROB, also check the CIT. If critical, check the RAT
+    to get the PCs of the source-generating instructions. */
+    //for (int i=0; i<arch_instr)
 
     return index;
 }
@@ -2147,10 +2162,6 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
             }
 
-            // FVP: Instruction critical if its inside the RETIRE WIDTH at this time
-            ROB.entry[rob_index].is_critical = (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH);       // FVPChange
-            if(ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
-
             DP(if (warmup_complete[cpu]) {
             cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
             cout << " branch_mispredicted: " << +ROB.entry[rob_index].branch_mispredicted << " fetch_stall: " << +fetch_stall;
@@ -2181,9 +2192,12 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                     fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
                 }
 
-                // FVP: Instruction critical if its inside the RETIRE WIDTH at this time
-                ROB.entry[rob_index].is_critical = (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH);       // FVPChange
-                if(ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
+                // FVP: Instruction is a candidate for being a critical instruction
+                // if its inside the RETIRE WIDTH at this time
+                if (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH) {
+                    ROB.entry[rob_index].is_critical = addToCIT(ROB.entry[rob_index].ip);
+                }
+                if (ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
 
                 DP(if (warmup_complete[cpu]) {
                 cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
@@ -2787,9 +2801,11 @@ void O3_CPU::retire_rob()
         if (instrOutValues.find(ROB.entry[ROB.head].instr_id) != instrOutValues.end()) {
             updatePredictor(ROB.entry[ROB.head].instr_id, 0xdeadbeef,
                         instrOutValues[ROB.entry[ROB.head].instr_id][0].second,
-                        0, ROB.entry[ROB.head].is_critical); // send actual execution latency here instead of 0
-        } else {
-            dontUpdatePredictor++;
+                            0, // send actual execution latency here instead of 0
+                            ROB.entry[ROB.head].is_critical);
+        }
+        else {
+            //cout << "Actual value not found in instrOutValues" << endl;
         }
 
         ooo_model_instr empty_entry;

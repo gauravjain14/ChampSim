@@ -8,15 +8,25 @@
 MyPredictor predictor;
 TraceInfo trace;
 
+uint64_t num_getPred = 0;
+uint64_t num_specUpd = 0;
+uint64_t num_updPred = 0;
+
 bool getPrediction(uint64_t seq_no, uint64_t pc, uint8_t piece, uint64_t &predicted_value) 
 {
+	num_getPred++;
+
+    //std::cout << "GetPrediction called for PC = " << std::hex << pc << std::endl;
+
 	// Allocate instruction into traceInfo
 	trace.info[seq_no].pc = pc;
 	// Check VT and predict if the confidence is saturated
 	uint8_t vtIdx = pc % VT_SIZE;
 
-	if(predictor.VT.entry[vtIdx].tag == pc) {		
-        if(predictor.VT.entry[vtIdx].confidence == 8 && predictor.VT.entry[vtIdx].no_predict != 4) {
+	if(predictor.VT.entry[vtIdx].tag == pc) {
+       // std::cout << "GetPrediction for PC = " << std::hex << pc << std::dec << " hit in VT with confidence = " << predictor.VT.entry[vtIdx].confidence << std::endl;
+		
+        if(predictor.VT.entry[vtIdx].confidence == 8) { // && predictor.VT.entry[vtIdx].no_predict != 4) {
 			predicted_value = predictor.VT.entry[vtIdx].data;
 			return 1;
 		}
@@ -40,7 +50,12 @@ void speculativeUpdate(uint64_t seq_no,			  // dynamic micro-instruction # (star
 					   uint64_t src2,
 					   uint64_t src3,
 					   uint64_t dst) 
-{	// seq no: instr_id
+{
+
+	num_specUpd++;
+    //std::cout << "SpeculativeUpdate called for PC = " << std::hex << pc << std::endl;
+
+	// seq no: instr_id
 	// eligible: True if insn = loadInstClass, else false.
 	// prediction result: same as described
 	// piece : ????
@@ -69,12 +84,13 @@ void speculativeUpdate(uint64_t seq_no,			  // dynamic micro-instruction # (star
 		if(prediction_result == 1) {
 			predictor.VT.entry[vtIdx].confidence = std::min(predictor.VT.entry[vtIdx].confidence+rand16(), 8); // Confidence incremented with a 1/16 probability
 			predictor.VT.entry[vtIdx].utility = std::min(predictor.VT.entry[vtIdx].utility+1, 4);
-			predictor.VT.entry[vtIdx].no_predict = 0;
+			predictor.VT.entry[vtIdx].no_predict = (predictor.VT.entry[vtIdx].confidence == 8) ? 0 : predictor.VT.entry[vtIdx].no_predict;
+            //std::cout << "confidence and utility incremented" << std::endl;
 		}
 		else if(prediction_result == 0) {
 			predictor.VT.entry[vtIdx].confidence = 0;
 			predictor.VT.entry[vtIdx].utility = 0;
-			predictor.VT.entry[vtIdx].no_predict++;
+			predictor.VT.entry[vtIdx].no_predict = std::min(predictor.VT.entry[vtIdx].no_predict+1, 4);
 		}
 	}
 }
@@ -85,6 +101,7 @@ void updatePredictor(uint64_t seq_no,		// dynamic micro-instruction #
 					 uint64_t actual_latency,
 					 bool critical)			// If distance from ROB head during execution was less than the retire width of the processor.
 {
+	num_updPred++;
 	// Retrieve instruction information from the traceInfo
 	uint64_t pc = trace.info[seq_no].pc;
 	bool eligible = (trace.info[seq_no].insttype == loadInstClass);
@@ -128,18 +145,23 @@ void updatePredictor(uint64_t seq_no,		// dynamic micro-instruction #
 		// If slot already contains the current pc
 		else if(predictor.CIT.entry[citIdx].tag == pc) {
 			predictor.CIT.entry[citIdx].confidence = std::min(predictor.CIT.entry[citIdx].confidence+1,4);
-			//std::cout << "PC = " << std::hex << pc << std::dec << " exists in CIT slot idx = " << citIdx << " confidence = " << predictor.CIT.entry[citIdx].confidence << std::endl;
+			//std::cout << "PC = " << std::hex << pc << std::dec << " exists in CIT slot idx = " << citIdx << "
+			//confidence = " << predictor.CIT.entry[citIdx].confidence << std::endl;
+		}
 
-			if(predictor.CIT.entry[citIdx].confidence == 4) {	// Confidence has saturated
-				// Try to migrate the entry to VT
-				assert(predictor.VT.entry[vtIdx].tag != pc);
+		if(prediction_result == 2) {	// Mostly means value was not predicted. Still, depending on the actual value, update the confidence and utility
+			if(predictor.VT.entry[vtIdx].data == actual_value) {	// The value hasn't changed
+				predictor.VT.entry[vtIdx].confidence = std::min(predictor.VT.entry[vtIdx].confidence+rand16(), 8); // Confidence incremented with a 1/16 probability
+				predictor.VT.entry[vtIdx].utility = std::min(predictor.VT.entry[vtIdx].utility+1, 4);
+                predictor.VT.entry[vtIdx].no_predict = predictor.VT.entry[vtIdx].no_predict = (predictor.VT.entry[vtIdx].confidence == 8) ? 0 : predictor.VT.entry[vtIdx].no_predict;
 
-				bool migration_complete = migrateCITtoVT(citIdx, eligible, actual_value);
-
-				/*
-				LT : While migrating the critical instruction to the VT, lookup its source PCs and add them to the LT
-				*/
-				addParentsToLT(src1, src2, src3);
+                //std::cout << "confidence and utility incremented" << std::endl;
+			}
+			else {		// The value has changed
+				predictor.VT.entry[vtIdx].confidence = 0;
+				predictor.VT.entry[vtIdx].utility = 0;
+				predictor.VT.entry[vtIdx].no_predict = std::min(predictor.VT.entry[vtIdx].no_predict+1, 4);
+				predictor.VT.entry[vtIdx].data = actual_value;
 			}
 		}
 		// Otherwise the slot contains a different PC
@@ -153,7 +175,75 @@ void updatePredictor(uint64_t seq_no,		// dynamic micro-instruction #
 				//std::cout << "PC = " << std::hex << pc << " replaced old PC = " << predictor.CIT.entry[citIdx].tag << std::dec << " in CIT slot idx = " << citIdx << " confidence = " << predictor.CIT.entry[citIdx].confidence << std::endl;
 			}
 		}
+
+		// If no_predict saturates, it means the entry is not predictable, so add its parent sources to LT and remove it from VT
+		if(predictor.VT.entry[vtIdx].no_predict == 4) {
+			addParentsToLT(src1, src2, src3);
+			predictor.VT.entry[vtIdx].clear();
+		}		
 	}
+    else {
+
+        /* 
+        LT : If the instruction hits in the LT, then move it to the VT if its a load. If it's not a load, then look up the src instructions and
+        add them to the LT. In either case, remove the entry from the LT.
+        */
+
+        uint8_t ltIdx = pc % LT_SIZE;
+        if(predictor.LT.entry[ltIdx].pc == pc) {
+            migrateLTtoVT(ltIdx, seq_no, eligible, actual_value);
+			return;	// If it hits in LT, then it already goes inside VT so doesn't matter 
+        }
+
+
+        /*
+        CIT : a) if(critical) then index into CIT with PC. If slot is empty, enter with confidence=0 & utility=4. If slot is filled with a
+                different PC, then decrement the utility of that entry by 1. If utility is 0, evict the old entry and enter the current one. If
+                slot already has the same PC, then increment confidence by 1 until saturation (at 4, as 2-bit confidence). If confidence saturates,
+                then migrate the CIT entry to the VT.
+        */
+
+        if(critical) {
+            // Hash into CIT with PC
+            uint8_t citIdx = pc % CIT_SIZE;
+
+            // If slot is empty
+            if(predictor.CIT.entry[citIdx].tag == 0xdeadbeef) {
+                // Enter the current pc into the CIT
+                predictor.CIT.entry[citIdx].set(pc, 0, 4);	// Utility is saturated initially
+                //std::cout << "PC = " << std::hex << pc << std::dec << " filled in CIT Empty slot idx = " << citIdx << " confidence = " << predictor.CIT.entry[citIdx].confidence << std::endl;
+            }
+            // If slot already contains the current pc
+            else if(predictor.CIT.entry[citIdx].tag == pc) {
+                predictor.CIT.entry[citIdx].confidence = std::min(predictor.CIT.entry[citIdx].confidence+1,4);
+                //std::cout << "PC = " << std::hex << pc << std::dec << " exists in CIT slot idx = " << citIdx << " confidence = " << predictor.CIT.entry[citIdx].confidence << std::endl;
+
+                if(predictor.CIT.entry[citIdx].confidence == 4) {	// Confidence has saturated
+                    // Try to migrate the entry to VT
+                    assert(predictor.VT.entry[vtIdx].tag != pc);
+
+                    //bool migration_complete = migrateCITtoVT(citIdx, eligible, actual_value);
+
+                    /*
+                    LT : While migrating the critical instruction to the VT, lookup its source PCs and add them to the LT
+                    */
+                    addParentsToLT(src1, src2, src3);
+                }
+            }
+            // Otherwise the slot contains a different PC
+            else { 		
+                predictor.CIT.entry[citIdx].utility = std::max(predictor.CIT.entry[citIdx].utility-1, 0);
+                //std::cout << "PC = " << std::hex << pc << std::dec << " clashes in CIT slot idx = " << citIdx << " new utility = " << predictor.CIT.entry[citIdx].utility << std::endl;
+
+                // If utility is 0, it can be evicted and current pc can be added
+                if(predictor.CIT.entry[citIdx].utility == 0) {
+                    predictor.CIT.entry[citIdx].set(pc, 0, 4);	// Utility is saturated initially
+                    //std::cout << "PC = " << std::hex << pc << " replaced old PC = " << predictor.CIT.entry[citIdx].tag << std::dec << " in CIT slot idx = " << citIdx << " confidence = " << predictor.CIT.entry[citIdx].confidence << std::endl;
+                }
+            }
+        }
+    }
+
     return;
 }
 
@@ -164,7 +254,31 @@ void beginPredictor(int argc_other, char **argv_other)
 
 void endPredictor() 
 {
+
+	printf("GetPredictions = %ld, SpeculativeUpdates = %ld, UpdatePredictors = %ld", num_getPred, num_specUpd, num_updPred);
+
     return;
+}
+
+bool addToCIT(uint64_t pc) {
+	uint64_t citIdx = pc & CIT_SIZE;
+	uint64_t tag = (pc >> (uint64_t)(log2(CIT_SIZE))) && 0x7ff; // 11-bit tag
+	
+	if (predictor.CIT.entry[citIdx].tag == tag) {
+		predictor.CIT.entry[citIdx].utility = std::min(predictor.CIT.entry[citIdx].utility+1, 4);
+		predictor.CIT.entry[citIdx].confidence = std::min(predictor.CIT.entry[citIdx].confidence+1, 4);
+
+		if (predictor.CIT.entry[citIdx].confidence == 4)
+			return true;
+	} else {
+		if (predictor.CIT.entry[citIdx].utility == 0) {
+			predictor.CIT.entry[citIdx].set(tag, 1, 1);
+		} else {
+			predictor.CIT.entry[citIdx].utility--;
+		}
+	}
+
+	return false;
 }
 
 bool migrateCITtoVT(uint8_t citIdx, bool eligible, uint64_t actual_value) {
@@ -183,7 +297,7 @@ bool migrateCITtoVT(uint8_t citIdx, bool eligible, uint64_t actual_value) {
 		migration_complete = true;
 	}
 	else {	// VT entry contains some other PC. It cannot contain current PC as specified by assert statement above.
-		predictor.VT.entry[vtIdx].utility--; // Decrement utility
+		predictor.VT.entry[vtIdx].utility = std::max(predictor.VT.entry[vtIdx].utility-1,0); // Decrement utility
 		if(predictor.VT.entry[vtIdx].utility == 0) {	// Utility has dropped to 0 so it can be evicted
 			predictor.VT.entry[vtIdx].set(pc, 0, 4, actual_value, eligible?0:4); // Utility is saturated initially, Initialize to "not predictable" if not eligible
 			migration_complete = true;
@@ -216,7 +330,7 @@ bool migrateLTtoVT(uint8_t ltIdx, uint64_t seq_no, bool eligible, uint64_t actua
 			migration_complete = true;
 		}
 		else {	// VT entry contains some other PC. It cannot contain current PC as specified by assert statement above.
-			predictor.VT.entry[vtIdx].utility--; // Decrement utility
+			predictor.VT.entry[vtIdx].utility = std::max(predictor.VT.entry[vtIdx].utility-1,0); // Decrement utility
 			if(predictor.VT.entry[vtIdx].utility == 0) {	// Utility has dropped to 0 so it can be evicted
 				predictor.VT.entry[vtIdx].set(pc, 0, 4, actual_value, 0); // Utility is saturated initially.
 				migration_complete = true;

@@ -1025,6 +1025,7 @@ int main(int argc, char **argv)
 
 #ifdef CVP_TRACE
         cout << "Value Predictor Statistics " << endl;
+        endPredictor();
         cout << "Number of instruction type mismatches " << ooo_cpu[i].num_instr_type_mismatch << endl;
         cout << "Number of instructions eligible for vp " << ooo_cpu[i].num_instr_eligible_vp << endl;
         cout << "Number of instructions for vp speculation " << ooo_cpu[i].num_instr_speculate_vp << endl;
