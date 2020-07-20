@@ -82,6 +82,13 @@ struct MyPredictor {
 			data = in_data;
 			no_predict = in_no_predict;
 		}
+		void clear() {
+			tag = 0xdeadbeef;
+			confidence = 0;
+			utility = 0;
+			data = 0xdeadbeef;
+			no_predict = 0;
+		}
 	};
 
 	struct VT {

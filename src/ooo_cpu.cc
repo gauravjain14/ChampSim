@@ -11,26 +11,47 @@ void O3_CPU::initialize_core()
 {
 }
 
-void O3_CPU::read_reg_values(FILE *fp) {
+void O3_CPU::read_reg_values(FILE *fp, uint64_t ip, uint64_t seqno, bool reset_fp) {
     uint64_t instr_ip;
+    uint8_t instr_type;
     uint8_t instr_numOutRegs;
     uint8_t regName;
     uint64_t regValue;
     
     std::vector<std::pair<uint8_t,uint64_t>> regValueVector;
-    fread(&instr_ip, sizeof(instr_ip), 1, cvp_values_fp);
-    fread(&instr_numOutRegs, sizeof(instr_numOutRegs), 1, cvp_values_fp);
+    fread(&instr_ip, sizeof(instr_ip), 1, fp);
+    fread(&instr_type, sizeof(instr_type), 1, fp);
+    fread(&instr_numOutRegs, sizeof(instr_numOutRegs), 1, fp);
+
+    // another sanity check to say that ip matches with instr_ip
+    if (instr_ip != ip) {
+        std::cerr << "Instr IP being read from trace doesn't match with "
+            "the one being read from trace values;\n Trace " << ip <<
+                " Trace values " << instr_ip << std::endl;
+        assert(instr_ip == ip);
+    }
+
+    instrTypesCvp[instr_ip] = instr_type;
+
     if (instr_numOutRegs > 0) {
         for (int i=0; i<instr_numOutRegs; i++) {
-            fread(&regName, sizeof(regName), 1, cvp_values_fp);
-            fread(&regValue, sizeof(regValue), 1, cvp_values_fp);
+            fread(&regName, sizeof(regName), 1, fp);
+            fread(&regValue, sizeof(regValue), 1, fp);
             if (regName != 64) {  // again, RFFLAGS in CVP
                 regValueVector.push_back(std::make_pair(regName, regValue));
             }
         }
         if (regValueVector.size() > 0)
-            instrOutValues[instr_ip] = regValueVector;
-    }        
+            instrOutValues[seqno] = regValueVector;
+            //instrOutValues[instr_ip] = regValueVector;
+    }
+
+    // reset to the start of the file because Champsim
+    // plays the first instruction twice.
+    if (reset_fp) {
+        std::cout << "Reset trace values file" << std::endl;
+        fseek(fp, 0, SEEK_SET);
+    }
 }
 
 void O3_CPU::read_from_trace()
@@ -192,6 +213,8 @@ void O3_CPU::read_from_trace()
                          << "*** CANNOT REOPEN TRACE FILE: " << trace_string << " ***" << endl;
                     assert(0);
                 }
+
+                reset_trace_values_file = true;
             }
             else
             { // successfully read the trace
@@ -218,6 +241,7 @@ void O3_CPU::read_from_trace()
                 arch_instr.asid[0] = cpu;
                 arch_instr.asid[1] = cpu;
 
+#ifndef CVP_TRACE
                 bool reads_sp = false;
                 bool writes_sp = false;
                 bool reads_flags = false;
@@ -257,10 +281,6 @@ void O3_CPU::read_from_trace()
                     if (arch_instr.destination_memory[i])
                     {
                         num_mem_ops++;
-
-                        // write instruction pc for store instruction
-                        //fprintf(mem_fp, "STORE: %#x\n", current_instr.ip);
-                        fprintf(mem_fp, "%#x: %#x\n", current_instr.ip, current_instr.destination_memory[i]);
 
                         // update STA, this structure is required to execute store instructions properly without deadlock
                         if (num_mem_ops > 0)
@@ -305,21 +325,11 @@ void O3_CPU::read_from_trace()
                         break;
                     }
 
-                    /*
-		    if((!arch_instr.is_branch) && (arch_instr.source_registers[i] > 25) && (arch_instr.source_registers[i] < 28))
-		      {
-			arch_instr.source_registers[i] = 0;
-		      }
-		    */
-
                     if (arch_instr.source_registers[i])
                         num_reg_ops++;
                     if (arch_instr.source_memory[i])
                     {
                         num_mem_ops++;
-
-                        // write instruction pc for load instruction
-                        fprintf(mem_fp, "%#x: %#x\n", current_instr.ip, current_instr.source_memory[i]);
                     }
                 }
 
@@ -343,7 +353,7 @@ void O3_CPU::read_from_trace()
                     arch_instr.branch_taken = 1;
                     arch_instr.branch_type = BRANCH_INDIRECT;
                 }
-                else if (!reads_sp && reads_ip && !writes_sp && writes_ip && reads_flags && !reads_other)
+                else if (!reads_sp && reads_ip && !writes_sp && 'writes_ip' && reads_flags && !reads_other)
                 {
                     // conditional branch
                     arch_instr.is_branch = 1;
@@ -386,14 +396,132 @@ void O3_CPU::read_from_trace()
                     arch_instr.branch_target = next_instr.ip;
                 }
 
-                /* Get output values for this instruction, if any */
-                read_reg_values(cvp_values_fp);
+#else
+                for (uint32_t i = 0; i < MAX_INSTR_DESTINATIONS; i++)
+                {
+                    arch_instr.destination_registers[i] = current_instr.destination_registers[i];
+                    arch_instr.destination_memory[i] = current_instr.destination_memory[i];
+                    arch_instr.destination_virtual_address[i] = current_instr.destination_memory[i];\
+
+                    if (arch_instr.destination_registers[i])
+                        num_reg_ops++;
+                    if (arch_instr.destination_memory[i])
+                    {
+                        num_mem_ops++;
+
+                        // write instruction pc for store instruction
+                        //fprintf(mem_fp, "STORE: %#x\n", current_instr.ip);
+                        fprintf(mem_fp, "%#x: %#x\n", current_instr.ip, current_instr.destination_memory[i]);
+
+                        // update STA, this structure is required to execute store instructions properly without deadlock
+                        if (num_mem_ops > 0)
+                        {
+#ifdef SANITY_CHECK
+                            if (STA[STA_tail] < UINT64_MAX)
+                            {
+                                if (STA_head != STA_tail)
+                                    assert(0);
+                            }
+#endif
+                            STA[STA_tail] = instr_unique_id;
+                            STA_tail++;
+
+                            if (STA_tail == STA_SIZE)
+                                STA_tail = 0;
+                        }
+                    }
+                }
+
+                for (int i = 0; i < NUM_INSTR_SOURCES; i++)
+                {
+                    arch_instr.source_registers[i] = current_instr.source_registers[i];
+                    arch_instr.source_memory[i] = current_instr.source_memory[i];
+                    arch_instr.source_virtual_address[i] = current_instr.source_memory[i];
+
+                    if (arch_instr.source_registers[i])
+                        num_reg_ops++;
+                    if (arch_instr.source_memory[i])
+                    {
+                        num_mem_ops++;
+
+                        // write instruction pc for load instruction
+                        fprintf(mem_fp, "%#x: %#x\n", current_instr.ip, current_instr.source_memory[i]);
+                    }
+                }
+                arch_instr.num_reg_ops = num_reg_ops;
+                arch_instr.num_mem_ops = num_mem_ops;
+
+                /* Get output values for this instruction, if any
+                The condition for instr_unique_id > 0 is because Champsim
+                puts the first instruction twice through the pipeline*/
+                if (!feof(cvp_values_fp)) {
+                    bool reset_fp = (instr_unique_id == 0) || reset_trace_values_file;
+                    read_reg_values(cvp_values_fp, arch_instr.ip, arch_instr.instr_id, reset_fp);
+                    reset_trace_values_file = false;
+                }
+
+                if ((instrTypesCvp[arch_instr.ip] == InstClass::loadInstClass) ||
+                    (instrTypesCvp[arch_instr.ip] == InstClass::storeInstClass)) {
+                    assert(num_mem_ops > 0 && "Insufficient Memory ops for Mem instr\n");
+                }
+
+                if (num_mem_ops > 0)
+                    arch_instr.is_memory = 1;
+
+                if (current_instr.is_branch) {
+                    arch_instr.is_branch = 1;
+                    arch_instr.branch_taken = current_instr.branch_taken;
+
+                    switch (instrTypesCvp[arch_instr.ip]) {
+                        case InstClass::uncondDirectBranchInstClass:
+                            arch_instr.branch_type = BRANCH_DIRECT_JUMP;
+                            break;
+
+                        case InstClass::uncondIndirectBranchInstClass:
+                            arch_instr.branch_type = BRANCH_INDIRECT;
+                            break;
+
+                        case InstClass::condBranchInstClass:
+                            arch_instr.branch_type = BRANCH_CONDITIONAL;
+                            break;
+
+                        default:
+                            arch_instr.branch_type = BRANCH_OTHER;
+                            break;
+                    }
+                }
+
+                total_branch_types[arch_instr.branch_type]++;
+
+                if ((arch_instr.is_branch == 1) && (arch_instr.branch_taken == 1))
+                {
+                    arch_instr.branch_target = next_instr.ip;
+                }
 
                 uint64_t predicted_value;
                 uint8_t prediction_result; // 0: incorrect, 1: correct, 2: unknown (not revealed)
                 bool eligible = false;
                 uint64_t next_pc;
-                InstClass insn;
+
+                InstClass insn = (InstClass)instrTypesCvp[arch_instr.ip];
+                /*InstClass insn = (arch_instr.is_branch && arch_instr.branch_type == BRANCH_CONDITIONAL) ? InstClass::condBranchInstClass :
+                                (arch_instr.is_branch && arch_instr.branch_type == BRANCH_DIRECT_JUMP) ? InstClass::uncondDirectBranchInstClass :
+                                (arch_instr.is_branch && arch_instr.branch_type == BRANCH_INDIRECT) ? InstClass::uncondIndirectBranchInstClass :
+                                (arch_instr.is_memory && arch_instr.source_memory[0]) ? InstClass::loadInstClass :
+                                (arch_instr.is_memory && arch_instr.destination_memory[0]) ? InstClass::storeInstClass :
+                                                                                                InstClass::aluInstClass;*/
+
+                // Not accounting for branch instructions; apart from that fp/slowAluInst instrs are only mismatched
+                if (insn != (InstClass)instrTypesCvp[arch_instr.ip]
+                        && ((InstClass)instrTypesCvp[arch_instr.ip] != InstClass::fpInstClass &&
+                             (InstClass)instrTypesCvp[arch_instr.ip] != InstClass::slowAluInstClass)){
+#ifdef CVP_DEBUG_PRINT
+                    std::cout << "Instruction mismatch for " << arch_instr.ip <<
+                        " type from trace " << (InstClass)instrTypesCvp[arch_instr.ip] <<
+                                "; type decoded " << insn << std::endl;
+#endif
+                    num_instr_type_mismatch++;
+                }
 
                 /* This probably includes all ALU and Load instructions because Load will also specify a dest-reg!
                 Assumption1: we only have one destination register for any instruction
@@ -403,91 +531,94 @@ void O3_CPU::read_from_trace()
                 bool speculate = getPrediction(arch_instr.instr_id, arch_instr.ip, 0, predicted_value);
                 if (speculate)
                     num_instr_speculate_vp++;
-                switch (arch_instr.destination_registers[0]) {
-                    case 0: // implies not updating any register.
-                    case REG_STACK_POINTER: // special purpose; not predicting control-flow 
-                    case REG_INSTRUCTION_POINTER: // not predicting control flow
-                        eligible = false;
-                        break;
-                    default:
-                        /* In CVP, R64, i.e. 65th register is used for register flags
-                        I am not sure of the scenario where an ALU instruction will have
-                        that as the destination register. But, since CVP doesn't speculate
-                        that, so won't we. 
-                        */
-                        insn = (arch_instr.is_branch && arch_instr.branch_type == BRANCH_CONDITIONAL) ? InstClass::condBranchInstClass :
-                                (arch_instr.is_branch && arch_instr.branch_type == BRANCH_DIRECT_JUMP) ? InstClass::uncondDirectBranchInstClass :
-                                (arch_instr.is_branch && arch_instr.branch_type == BRANCH_INDIRECT) ? InstClass::uncondIndirectBranchInstClass :
-                                (arch_instr.is_memory && arch_instr.source_memory[0]) ? InstClass::loadInstClass :
-                                (arch_instr.is_memory && arch_instr.destination_memory[0]) ? InstClass::storeInstClass :
-                                                                                                InstClass::aluInstClass;
-                        // make memory instructions also ineligible for now - remove the 3rd condition later
-                        // eligible = (!arch_instr.is_branch && arch_instr.destination_registers[0] != 64) ? true : false;
 
-                        // VP instructions distribution
-                        if(speculate) {
-                            if(insn == InstClass::loadInstClass) vp_load++;
-                            else if(insn == InstClass::storeInstClass) vp_store++;
-                            else if(insn == InstClass::aluInstClass || insn == InstClass::fpInstClass || insn == InstClass::slowAluInstClass) vp_alu++;
-                            else vp_branch++;
-                        }
+                // VP instructions distribution
+                if(speculate) {
+                    if(insn == InstClass::loadInstClass) vp_load++;
+                    else if(insn == InstClass::storeInstClass) vp_store++;
+                    else if(insn == InstClass::aluInstClass || insn == InstClass::fpInstClass || insn == InstClass::slowAluInstClass) vp_alu++;
+                    else vp_branch++;
+                }
 
-                        // For FVP only load instructions will be eligible
-                        eligible = insn == InstClass::loadInstClass;        // FVPChange
+                // For FVP only load instructions will be eligible
+                eligible = insn == InstClass::loadInstClass;        // FVPChange
 
-                        if (eligible)
-                            num_instr_eligible_vp++;
+                num_instr_eligible_vp+= (eligible) ? 1: 0;
 
-                        if (eligible && speculate) {
-                            // read the actual value from the trace
-                            if (instrOutValues.find(arch_instr.ip) != instrOutValues.end()) {
-                                // sanity check that the dest-regs are same
-                                // because there are certain instructions with
-                                // more than one destination registers (say, load)
-                                for (auto elem: instrOutValues[arch_instr.ip]) {
-                                    if (elem.first == arch_instr.destination_registers[0]) {
-                                        prediction_result = elem.second == predicted_value;
-                                        if (!prediction_result) {
-                                            if(warmup_complete[cpu]) {
-                                                fetch_stall = 1;
-                                                arch_instr.value_mispredicted = 1;
-                                                continue_reading = 0;
-                                                fetch_resume_cycle = 0;
-                                                if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass) {
-                                                    vp_incorrect_mem_executions++;
-                                                    std::cout << "Stall for " << arch_instr.ip << " due to Memory value misprediction at " <<
-                                                                current_core_cycle[cpu] << " cycles" << std::endl;
-                                                } else {
-                                                    std::cout << "Stall for " << arch_instr.ip << " due to ALU value misprediction at " <<
-                                                                current_core_cycle[cpu] << " cycles" << std::endl;                                                    
-                                                    vp_incorrect_reg_executions++;                                                            
-                                                }
-                                            }
+                if (eligible && speculate) {
+#ifdef CVP__DEBUG_PRINT
+                    eligible_speculate_type.push_back(std::make_pair(arch_instr.ip,insn));
+#endif
+                    // read the actual value from the trace
+                    if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end()) {
+                        // sanity check that the dest-regs are same because there are certain
+                        // instructions with more than one destination registers (say, load)
+                        // but we are perhaps ignoring all but the first register
+                        for (auto elem: instrOutValues[arch_instr.instr_id]) {
+                            if (elem.first == arch_instr.destination_registers[0]) {
+                                prediction_result = elem.second == predicted_value;
+                                if (!prediction_result) {
+                                    if(warmup_complete[cpu]) {
+                                        fetch_stall = 1;
+                                        arch_instr.value_mispredicted = 1;
+                                        continue_reading = 0;
+                                        fetch_resume_cycle = 0;
+                                        if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass) {
+                                            vp_incorrect_mem_executions++;
+#ifdef CVP_DEBUG_PRINT
+                                            std::cout << "Stall for " << arch_instr.ip << " due to Memory value misprediction at " <<
+                                                        current_core_cycle[cpu] << " cycles" << std::endl;
+#endif
                                         } else {
-                                            if(warmup_complete[cpu]) {
-                                                arch_instr.value_mispredicted = 0;
-                                                if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass)
-                                                    vp_correct_mem_executions++;
-                                                else
-                                                    vp_correct_reg_executions++;
-                                            }
+#ifdef CVP_DEBUG_PRINT
+                                            std::cout << "Stall for " << arch_instr.ip << " due to ALU value misprediction at " <<
+                                                        current_core_cycle[cpu] << " cycles" << std::endl;                                                    
+#endif
+                                            vp_incorrect_reg_executions++;                                                            
                                         }
                                     }
+                                } else {
+                                    if(warmup_complete[cpu]) {
+                                        arch_instr.value_mispredicted = 0;
+                                        if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass)
+                                            vp_correct_mem_executions++;
+                                        else
+                                            vp_correct_reg_executions++;
+                                    }
                                 }
-                            } else { // if not present in the trace
-                                prediction_result = 2;
                             }
-                        } else {    // Not predicted
-                            prediction_result = 2; 
                         }
-
-                        next_pc = (arch_instr.is_branch && arch_instr.branch_taken) ?
-                                            arch_instr.branch_target : arch_instr.ip + 4;
-                        speculativeUpdate(arch_instr.instr_id, eligible, prediction_result,
-                                            arch_instr.ip, next_pc, insn, 0, 0, 0, 0, 0);
-                        arch_instr.is_speculative = eligible && speculate;
-                        break;
+                    } else { // if not present in the trace
+                        prediction_result = 2;
+                    }
+                } else {
+                    prediction_result = 2;
                 }
+
+                next_pc = (arch_instr.is_branch && arch_instr.branch_taken) ?
+                                    arch_instr.branch_target : arch_instr.ip + 4;
+                if (arch_instr.destination_registers[0])
+                    speculativeUpdate(arch_instr.instr_id, eligible, prediction_result,
+                                    arch_instr.ip, next_pc, insn, 0, 0, 0, 0, 0);
+                arch_instr.is_speculative = eligible && speculate;
+#endif
+
+                // data values for memory hierarchy
+                /*bool have_instr_data = false;
+                if (insn == InstClass::loadInstClass) {
+                    for (auto elem: instrOutValues[arch_instr.ip]){
+                        if (elem.first == arch_instr.destination_registers[0]){
+                            arch_instr.instr_data = elem.second;
+                            have_instr_data = true;
+                        }
+                    }
+                    if (!have_instr_data)
+                        arch_instr.instr_data = 0xcafedead; // should be unreachable
+                } else if (insn == InstClass::storeInstClass) {
+                    arch_instr.instr_data = 0xcafedead;  // We don't have actual store values, right?
+                }*/
+
+                arch_instr.instr_data = 0xcafedead;
 
                 // add this instruction to the IFETCH_BUFFER
                 if (IFETCH_BUFFER.occupancy < IFETCH_BUFFER.SIZE)
@@ -1081,10 +1212,6 @@ void O3_CPU::do_scheduling(uint32_t rob_index)
         else
             ROB.entry[rob_index].event_cycle += SCHEDULING_LATENCY;
 
-        if (ROB.entry[rob_index].is_speculative && !ROB.entry[rob_index].value_mispredicted) {
-
-        }
-
         /* Don't do this. We want the instruction to go through the execute stage as well. */
         // ADD LATENCY
         /*if (ROB.entry[rob_index].event_cycle < current_core_cycle[cpu])
@@ -1207,6 +1334,13 @@ void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t sourc
             cout << " RAW reg_index: " << +ROB.entry[current].source_registers[source_index];
             cout << " producer_id: " << ROB.entry[prior].instr_id << endl; });
 
+#ifdef CVP_DEBUG_PRINT
+            if (ROB.entry[current].is_branch) {
+                printf(" Branch PC %#x type: %d is dependent on %#x for Reg %d\n",
+                    ROB.entry[current].ip,instrTypesCvp[ROB.entry[current].ip],
+                    ROB.entry[prior].ip, ROB.entry[current].source_registers[source_index]);
+            }
+#endif
             return;
         }
     }
@@ -1472,6 +1606,7 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
     LQ.entry[lq_index].asid[0] = ROB.entry[rob_index].asid[0];
     LQ.entry[lq_index].asid[1] = ROB.entry[rob_index].asid[1];
     LQ.entry[lq_index].event_cycle = current_core_cycle[cpu] + SCHEDULING_LATENCY;
+    LQ.entry[lq_index].instr_data = ROB.entry[rob_index].instr_data;
     LQ.occupancy++;
 
     // a good place to log memory loads?
@@ -1675,6 +1810,7 @@ void O3_CPU::add_store_queue(uint32_t rob_index, uint32_t data_index)
     SQ.entry[sq_index].asid[0] = ROB.entry[rob_index].asid[0];
     SQ.entry[sq_index].asid[1] = ROB.entry[rob_index].asid[1];
     SQ.entry[sq_index].event_cycle = current_core_cycle[cpu] + SCHEDULING_LATENCY;
+    SQ.entry[sq_index].instr_data = ROB.entry[rob_index].instr_data;
 
     SQ.occupancy++;
     SQ.tail++;
@@ -2360,7 +2496,8 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
             cout << "[ROB] " << __func__ << " load instr_id: " << LQ.entry[lq_index].instr_id;
             cout << " L1D_FETCH_DONE fetched: " << +LQ.entry[lq_index].fetched << hex << " address: " << (LQ.entry[lq_index].physical_address>>LOG2_BLOCK_SIZE);
             cout << " full_addr: " << LQ.entry[lq_index].physical_address << dec << " remain_mem_ops: " << ROB.entry[rob_index].num_mem_ops;
-            cout << " load_merged: " << +queue->entry[index].load_merged << " inflight_mem: " << inflight_mem_executions << endl; });
+            cout << " load_merged: " << +queue->entry[index].load_merged << " inflight_mem: " << inflight_mem_executions << endl;});
+            //cout << " L1D_FETCH_DATA: " << LQ});
 
             release_load_queue(lq_index);
             handle_merged_load(&queue->entry[index]);
@@ -2610,6 +2747,7 @@ void O3_CPU::retire_rob()
                         data_packet.asid[0] = SQ.entry[sq_index].asid[0];
                         data_packet.asid[1] = SQ.entry[sq_index].asid[1];
                         data_packet.event_cycle = current_core_cycle[cpu];
+                        data_packet.data = SQ.entry[sq_index].instr_data;
 
                         L1D.add_wq(&data_packet);
                     }
@@ -2664,12 +2802,14 @@ void O3_CPU::retire_rob()
     
         /* Okay, this is a bit tricky. How to handle cases with 
         multiple destination registers? We'll get to  it soon. */
-        //std::cout << "Just before UpdatePredictor" << std::endl;
-        if (instrOutValues.find(ROB.entry[ROB.head].ip) != instrOutValues.end()) {
+        if (instrOutValues.find(ROB.entry[ROB.head].instr_id) != instrOutValues.end()) {
             updatePredictor(ROB.entry[ROB.head].instr_id, 0xdeadbeef,
-                        instrOutValues[ROB.entry[ROB.head].ip][0].second,
+                        instrOutValues[ROB.entry[ROB.head].instr_id][0].second,
                             0, // send actual execution latency here instead of 0
                             ROB.entry[ROB.head].is_critical);
+        }
+        else {
+            //cout << "Actual value not found in instrOutValues" << endl;
         }
 
         ooo_model_instr empty_entry;
