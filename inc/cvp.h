@@ -156,7 +156,13 @@ void endPredictor();
 // Additional functions for Focused VP ---> FVPChange
 
 bool addToCIT(uint64_t pc);
+bool checkLT(uint64_t pc);
+bool checkVT(uint64_t pc);
+bool getFromCIT(uint64_t pc);
+void addToLT(uint8_t src_reg);
+void addToLT(uint64_t pc, InstClass type, uint8_t *source_registers, uint32_t num_src_regs);
+void updateVT(uint64_t pc, uint64_t actual_value);
 bool migrateCITtoVT(uint8_t citIdx, bool eligible, uint64_t actual_value);
-bool migrateLTtoVT(uint8_t ltIdx, uint64_t seq_no, bool eligible, uint64_t actual_value);
+bool migrateLTtoVT(uint64_t pc, uint64_t seq_no, bool eligible, uint64_t actual_value);
 void addParentsToLT(uint64_t src1, uint64_t src2, uint64_t src3);
 int rand16();

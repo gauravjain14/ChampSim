@@ -270,7 +270,8 @@ public:
   // value prediction
   std::unordered_map<uint64_t, std::vector<std::pair<uint8_t, uint64_t>>> instrOutValues;
   std::unordered_map<uint64_t, uint8_t> instrTypesCvp; // This is sanity check between CVP and ChampSim
-  void read_reg_values(FILE *fp, uint64_t ip, uint64_t seqno, bool reset_fp);
+  std::unordered_map<uint64_t, uint64_t> instrSeqWithPC;
+  void read_reg_values(FILE *fp, uint64_t ip, uint64_t seqno, bool reset_fp, uint8_t *outRegs);
 };
 
 extern O3_CPU ooo_cpu[NUM_CPUS];

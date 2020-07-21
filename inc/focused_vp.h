@@ -1,15 +1,24 @@
 #include <cinttypes>
 #include <unordered_map>
+#include <bitset>
+#include <cmath>
 #ifndef _CVP_H
 #include "cvp.h"
 #endif
 
 #define CIT_SIZE 32
-#define VT_SIZE 48
+#define VT_SIZE 64
+#define LOG2_VT_SIZE 6
 #define RAT_SIZE 64
 #define LT_SIZE 8
 #define MRT_SIZE 136
 #define MRVF_SIZE 40
+#define VT_TAG_SIZE 11 // 11 bits
+
+template<typename T>
+T bitExtract(T data, uint8_t start, uint8_t numBits) {
+	return (data >> start) & ((T)(pow(2,numBits)) - 1);
+}
 
 struct TraceInfo {
 
@@ -60,8 +69,11 @@ struct MyPredictor {
 		uint8_t no_predict;
 
 		VT_entry() : tag(0xdeadbeef), confidence(0), utility(0), data(0xdeadbeef), no_predict(0) {}
+
+		// All the 64-bits of the PC shouldn't be used as the tag, right? At least that's 
+		// what the paper on FVP says
 		void set(uint64_t in_tag, uint8_t in_confidence, uint8_t in_utility, uint64_t in_data, uint8_t in_no_predict) {
-			tag = in_tag;
+			tag = bitExtract<uint64_t>(in_tag, LOG2_VT_SIZE, VT_TAG_SIZE); // in_tag 
 			confidence = in_confidence;
 			utility = in_utility;
 			data = in_data;
