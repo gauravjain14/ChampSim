@@ -30,91 +30,57 @@ bool getPrediction(uint64_t seq_no, uint64_t pc, uint8_t piece, uint64_t &predic
 	return 0;
 }
 
-void speculativeUpdate(uint64_t seq_no,			  // dynamic micro-instruction # (starts at 0 and increments indefinitely)
-					   bool eligible,			  // true: instruction is eligible for value prediction. false: not eligible.
+// do we still need traceInfo?
+void populateTraceInfo(uint64_t seq_no,			  // dynamic micro-instruction # (starts at 0 and increments indefinitely)
 					   uint8_t prediction_result, // 0: incorrect, 1: correct, 2: unknown (not revealed)
-					   // Note: can assemble local and global branch history using pc, next_pc, and insn.
 					   uint64_t pc,
 					   uint64_t next_pc,
 					   InstClass insn,
-					   uint8_t piece,
-					   // Note: up to 3 logical source register specifiers, up to 1 logical destination register specifier.
-					   // 0xdeadbeef means that logical register does not exist.
-					   // May use this information to reconstruct architectural register file state (using log. reg. and value at updatePredictor()).
 					   uint64_t src1,
 					   uint64_t src2,
 					   uint64_t src3,
-					   uint64_t dst) 
-{
-
-	num_specUpd++;
-
-	// seq no: instr_id
-	// eligible: True if insn = loadInstClass, else false.
-	// prediction result: same as described
-	// piece : ????
-	// src1, src2, src3, dst: All source and destination specifiers, 0xdeadbeef if DNE
-
-	// Add the remaining information to TraceInfo
+					   uint64_t dst) {
+	
 	assert(trace.info[seq_no].pc == pc);
+	/*
+	RAT : Update the RAT for the destination register with the current pc
+	*/
+	predictor.RAT.entry[dst].pc = pc;
 	trace.info[seq_no].next_pc = next_pc;
 	trace.info[seq_no].insttype = insn;
 	trace.info[seq_no].src1 = src1;
 	trace.info[seq_no].src2 = src2;
 	trace.info[seq_no].src3 = src3;
 	trace.info[seq_no].dst = dst;
-	trace.info[seq_no].prediction_result = prediction_result; 
+	trace.info[seq_no].prediction_result = prediction_result;
+}
 
-	/*
-	RAT : Update the RAT for the destination register with the current pc
-	*/
-	predictor.RAT.entry[dst].pc = pc;
-
-	/*
-	VT : If the instruction hits in VT, update the confidence and utility metrics according to the prediction_result
-	*/
-	uint8_t vtIdx = pc % VT_SIZE;
-	bool pcInVT = checkVT(pc);
-
-	if (insn == InstClass::loadInstClass && pcInVT && (prediction_result != 2)) {
-		if (!prediction_result) {
-			predictor.VT.entry[vtIdx].confidence = 0;
-			predictor.VT.entry[vtIdx].utility = 0;
-			predictor.VT.entry[vtIdx].no_predict = std::min(predictor.VT.entry[vtIdx].no_predict+1, 4);
-		} else {
-			// incrementing confidence is anyways redundant since it'd already be saturated if are making predictions
+void updateVT(bool critical, // we need this for context-value-prediction
+			bool eligible,
+			uint64_t pc,
+			uint64_t seq_no,
+			uint64_t actual_addr,
+			uint64_t actual_value,
+			uint64_t actual_latency)
+{
+	if (checkVT(pc) && eligible) {
+		uint8_t vtIdx = pc & (VT_SIZE - 1);
+		/* This should cover all the cases whether this VT entry was already making
+		prediction or was being given the confidence boost or being penalized */
+		if (predictor.VT.entry[vtIdx].data == actual_value) {
+			// we know data is repeating
 			predictor.VT.entry[vtIdx].confidence = std::min(predictor.VT.entry[vtIdx].confidence+rand16(), 8); // Confidence incremented with a 1/16 probability
 			predictor.VT.entry[vtIdx].utility = std::min(predictor.VT.entry[vtIdx].utility+1, 4);
 			predictor.VT.entry[vtIdx].no_predict = (predictor.VT.entry[vtIdx].confidence == 8) ? 0 : predictor.VT.entry[vtIdx].no_predict;
+		} else {
+			predictor.VT.entry[vtIdx].confidence = 0;
+			predictor.VT.entry[vtIdx].utility = 0;
+			predictor.VT.entry[vtIdx].no_predict = std::min(predictor.VT.entry[vtIdx].no_predict+1, 4);
+			predictor.VT.entry[vtIdx].data = actual_value;
 		}
-	}
-}
-
-void updatePredictor(uint64_t seq_no,		// dynamic micro-instruction #
-					 uint64_t actual_addr,	// load or store address (0xdeadbeef if not a load or store instruction)
-					 uint64_t actual_value, // value of destination register (0xdeadbeef if instr. is not eligible for value prediction)
-					 uint64_t actual_latency,
-					 bool critical)			// If distance from ROB head during execution was less than the retire width of the processor.
-{
-	num_updPred++;
-	// Retrieve instruction information from the traceInfo
-	uint64_t pc = trace.info[seq_no].pc;
-	bool eligible = (trace.info[seq_no].insttype == loadInstClass);
-	uint64_t src1 = trace.info[seq_no].src1;
-	uint64_t src2 = trace.info[seq_no].src2;
-	uint64_t src3 = trace.info[seq_no].src3;
-	uint8_t prediction_result = trace.info[seq_no].prediction_result;
-
-	/* 
-	LT : If the instruction hits in the LT, then move it to the VT if its a load. If it's not a load, 
-	then look up the src instructions and add them to the LT. In either case, remove the entry from the LT.
-	*/
-	uint8_t ltIdx = pc % LT_SIZE;
-	if (checkLT(pc)) {
+	} else if (checkLT(pc)) {
 		migrateLTtoVT(pc, seq_no, eligible, actual_value);
 	}
-
-    return;
 }
 
 void beginPredictor(int argc_other, char **argv_other)
@@ -206,24 +172,6 @@ void addToLT(uint8_t src_reg) {
 	predictor.LT.entry[ltindex].pc = pc;
 }
 
-void updateVT(uint64_t pc, uint64_t actual_value) {
-	if (checkVT(pc)) {
-		uint8_t vtIdx = pc & (VT_SIZE - 1);
-		if (predictor.VT.entry[vtIdx].data == actual_value) {
-			// we know data is repeating
-			predictor.VT.entry[vtIdx].confidence = std::min(predictor.VT.entry[vtIdx].confidence+rand16(), 8); // Confidence incremented with a 1/16 probability
-			predictor.VT.entry[vtIdx].utility = std::min(predictor.VT.entry[vtIdx].utility+1, 4);
-			predictor.VT.entry[vtIdx].no_predict = (predictor.VT.entry[vtIdx].confidence == 8) ? 0 : predictor.VT.entry[vtIdx].no_predict;
-		}
-		else {
-			predictor.VT.entry[vtIdx].confidence = 0;
-			predictor.VT.entry[vtIdx].utility = 0;
-			// don't push it towards not-predictable even before it has started making predictions
-			//predictor.VT.entry[vtIdx].no_predict = std::min(predictor.VT.entry[vtIdx].no_predict+1, 4);
-		}
-	}
-}
-
 bool migrateCITtoVT(uint8_t citIdx, bool eligible, uint64_t actual_value) {
 
 	uint64_t pc = predictor.CIT.entry[citIdx].tag;
@@ -258,10 +206,6 @@ bool migrateLTtoVT(uint64_t pc, uint64_t seq_no, bool eligible, uint64_t actual_
 	uint8_t ltIdx = pc % LT_SIZE;
 	uint64_t vtIdx = pc % VT_SIZE;
 
-	if (vtIdx != (pc & (VT_SIZE-1))){
-		std::cout << "What's happening vtIdx " << vtIdx << " pc & (VT_SIZE-1)" << (pc & (VT_SIZE-1)) << std::endl;
-	}
-
 	/* It is possible that we already have the same instruction in the VT, right?
 	We need not bother about non-load instructions in this scenario. But what happens
 	when we are updating a previous load instruction?
@@ -289,32 +233,6 @@ bool migrateLTtoVT(uint64_t pc, uint64_t seq_no, bool eligible, uint64_t actual_
 		// evict entry from LT
 		predictor.LT.entry[ltIdx].pc = 0xdeadbeef;
 	}
-
-	/* This doesn't look right. As per my understanding we should add to LT when
-	the instruction is being added to the ROB and obtain the PC from the RAT 
-	then and there. 
-	
-	One major reason for that is the scenario where the entry corresponding to either
-	of these sources in the RAT may have been updated with some other PC because
-	we are storing the Architectural Registers in the RAT.
-	
-	By the time the current instruction, which is a non-load instruction has 
-	finished execution, the architectural source register(s) it was	dependent on,
-	might see another instruction(s), thus giving us a wrong PC*/
-
-	/*else {	// If it's not a load, find the parent instructions and add them to the LT
-
-		// First evict the LT entry
-		predictor.LT.entry[ltIdx].pc = 0xdeadbeef;
-
-		// Retrieve src register IDs from TraceInfo
-		uint64_t src1 = trace.info[seq_no].src1;
-		uint64_t src2 = trace.info[seq_no].src2;
-		uint64_t src3 = trace.info[seq_no].src3;
-
-		addParentsToLT(src1, src2, src3);
-
-	}*/
 
 	return migration_complete;
 }

@@ -142,3 +142,21 @@ struct MyPredictor {
 	// Branch history register
 	uint32_t bhr;
 };
+
+void populateTraceInfo(uint64_t seq_no,			  // dynamic micro-instruction # (starts at 0 and increments indefinitely)
+					   uint8_t prediction_result, // 0: incorrect, 1: correct, 2: unknown (not revealed)
+					   uint64_t pc,
+					   uint64_t next_pc,
+					   InstClass insn,
+					   uint64_t src1,
+					   uint64_t src2,
+					   uint64_t src3,
+					   uint64_t dst);
+
+void updateVT(bool critical,
+			bool eligible,
+			uint64_t pc,
+			uint64_t seq_no,
+			uint64_t actual_addr,
+			uint64_t actual_value,
+			uint64_t actual_latency);

@@ -551,7 +551,7 @@ void O3_CPU::read_from_trace()
                             }
                         }
                         arch_instr.instr_data = instrOutValues[arch_instr.instr_id][0].second;
-                    } else { // if not present in the trace
+                    } else { // if not present in the trace. Can this ever happen, though?
                         prediction_result = 2;
                         arch_instr.instr_data = 0xcafedead;
                     }
@@ -596,8 +596,8 @@ void O3_CPU::read_from_trace()
                     uint64_t src2 = (uint64_t)arch_instr.source_registers[1];
                     uint64_t src3 = (uint64_t)arch_instr.source_registers[2];
                     uint64_t dest = (uint64_t)arch_instr.destination_registers[0];
-                    speculativeUpdate(arch_instr.instr_id, eligible, prediction_result,
-                                arch_instr.ip, next_pc, insn, 0, src1, src2, src3, dest);
+                    populateTraceInfo(arch_instr.instr_id, prediction_result,
+                                    arch_instr.ip, next_pc, insn, src1, src2, src3, dest);
                 }
 
                 arch_instr.is_speculative = eligible && speculate;
@@ -2185,7 +2185,15 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 if (ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
 
                 // Speculatively update the VT as well
-                updateVT(ROB.entry[rob_index].ip, ROB.entry[rob_index].instr_data);
+                uint64_t actual_addr = (instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass) ?
+                                ROB.entry[rob_index].destination_memory[0] : 0xdeadbeef;
+                updateVT(false,
+                    (instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass),
+                    ROB.entry[rob_index].ip,
+                    ROB.entry[rob_index].instr_id,
+                    actual_addr,
+                    ROB.entry[rob_index].instr_data,
+                    0);
 
                 DP(if (warmup_complete[cpu]) {
                 cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
@@ -2784,9 +2792,11 @@ void O3_CPU::retire_rob()
             }
         }
     
+        // Move call to updatePredictor in complete_execution for speculative update
+        // to the Value Predictor Table
         /* Okay, this is a bit tricky. How to handle cases with 
         multiple destination registers? We'll get to  it soon. */
-        if (instrOutValues.find(ROB.entry[ROB.head].instr_id) != instrOutValues.end()) {
+        /*if (instrOutValues.find(ROB.entry[ROB.head].instr_id) != instrOutValues.end()) {
             uint64_t actual_addr = (instrTypesCvp[ROB.entry[ROB.head].ip] == InstClass::loadInstClass) ?
                                 ROB.entry[ROB.head].destination_memory[0] : 0xdeadbeef;
             updatePredictor(ROB.entry[ROB.head].instr_id,
@@ -2794,10 +2804,7 @@ void O3_CPU::retire_rob()
                             ROB.entry[ROB.head].instr_data,
                             0, // send actual execution latency here instead of 0
                             ROB.entry[ROB.head].is_critical);
-        }
-        else {
-            //cout << "Actual value not found in instrOutValues" << endl;
-        }
+        }*/
 
         ooo_model_instr empty_entry;
         ROB.entry[ROB.head] = empty_entry;
