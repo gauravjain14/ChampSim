@@ -143,6 +143,8 @@ struct MyPredictor {
 	uint32_t bhr;
 };
 
+void updateBHR(bool taken);
+
 void populateTraceInfo(uint64_t seq_no,			  // dynamic micro-instruction # (starts at 0 and increments indefinitely)
 					   uint8_t prediction_result, // 0: incorrect, 1: correct, 2: unknown (not revealed)
 					   uint64_t pc,

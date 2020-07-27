@@ -12,6 +12,10 @@ uint64_t num_getPred = 0;
 uint64_t num_specUpd = 0;
 uint64_t num_updPred = 0;
 
+void updateBHR(bool taken) {
+	predictor.bhr = (predictor.bhr << 1) | taken;
+}
+
 bool getPrediction(uint64_t seq_no, uint64_t pc, uint8_t piece, uint64_t &predicted_value) 
 {
 	num_getPred++;
@@ -19,10 +23,18 @@ bool getPrediction(uint64_t seq_no, uint64_t pc, uint8_t piece, uint64_t &predic
 
 	// Allocate instruction into traceInfo
 	trace.info[seq_no].pc = pc;
-	if (checkVT(pc)) {
-		uint8_t vtIdx = pc & (VT_SIZE-1);
+	uint8_t vtIdx = pc & (VT_SIZE - 1);
+	uint8_t branchVTIdx = (pc ^ predictor.bhr) & (VT_SIZE - 1);
+
+	// use last value prediction first. If not found, check context value prediction
+	if (checkVT(pc, vtIdx)) {
 		if(predictor.VT.entry[vtIdx].confidence == 8) { // && predictor.VT.entry[vtIdx].no_predict != 4) {
 			predicted_value = predictor.VT.entry[vtIdx].data;
+			return 1;
+		}
+	} else if (checkVT(pc, branchVTIdx)) {
+		if(predictor.VT.entry[branchVTIdx].confidence == 8) { // && predictor.VT.entry[vtIdx].no_predict != 4) {
+			predicted_value = predictor.VT.entry[branchVTIdx].data;
 			return 1;
 		}
 	}
@@ -63,20 +75,38 @@ void updateVT(bool critical, // we need this for context-value-prediction
 			uint64_t actual_value,
 			uint64_t actual_latency)
 {
-	if (checkVT(pc) && eligible) {
-		uint8_t vtIdx = pc & (VT_SIZE - 1);
-		/* This should cover all the cases whether this VT entry was already making
-		prediction or was being given the confidence boost or being penalized */
-		if (predictor.VT.entry[vtIdx].data == actual_value) {
-			// we know data is repeating
-			predictor.VT.entry[vtIdx].confidence = std::min(predictor.VT.entry[vtIdx].confidence+rand16(), 8); // Confidence incremented with a 1/16 probability
-			predictor.VT.entry[vtIdx].utility = std::min(predictor.VT.entry[vtIdx].utility+1, 4);
-			predictor.VT.entry[vtIdx].no_predict = (predictor.VT.entry[vtIdx].confidence == 8) ? 0 : predictor.VT.entry[vtIdx].no_predict;
+	uint8_t vtIdx = pc & (VT_SIZE - 1);
+	if (checkVT(pc, vtIdx) && eligible) {
+		// if the entry is not predictable and critical, use context value prediction
+		if (predictor.VT.entry[vtIdx].no_predict == 4 && critical) {
+			// XOR the PC with the BHR to get the hash
+			uint8_t branchVtIdx = ((pc ^ predictor.bhr)) & (VT_SIZE - 1);
+			if (checkVT(pc, branchVtIdx)) {
+				if (predictor.VT.entry[branchVtIdx].data == actual_value) {
+					// we know data is repeating
+					predictor.VT.entry[branchVtIdx].confidence = std::min(predictor.VT.entry[branchVtIdx].confidence+rand16(), 8);
+					predictor.VT.entry[branchVtIdx].utility = std::min(predictor.VT.entry[branchVtIdx].utility+1, 4);
+					predictor.VT.entry[branchVtIdx].no_predict = (predictor.VT.entry[branchVtIdx].confidence == 8) ?
+																	0 : predictor.VT.entry[branchVtIdx].no_predict;
+				} else {
+					predictor.VT.entry[branchVtIdx].confidence = 0;
+					predictor.VT.entry[branchVtIdx].utility = 0;
+					predictor.VT.entry[branchVtIdx].no_predict = std::min(predictor.VT.entry[branchVtIdx].no_predict+1, 4);
+					predictor.VT.entry[branchVtIdx].data = actual_value;
+				}				
+			}
 		} else {
-			predictor.VT.entry[vtIdx].confidence = 0;
-			predictor.VT.entry[vtIdx].utility = 0;
-			predictor.VT.entry[vtIdx].no_predict = std::min(predictor.VT.entry[vtIdx].no_predict+1, 4);
-			predictor.VT.entry[vtIdx].data = actual_value;
+			if (predictor.VT.entry[vtIdx].data == actual_value) {
+				// we know data is repeating
+				predictor.VT.entry[vtIdx].confidence = std::min(predictor.VT.entry[vtIdx].confidence+rand16(), 8); // Confidence incremented with a 1/16 probability
+				predictor.VT.entry[vtIdx].utility = std::min(predictor.VT.entry[vtIdx].utility+1, 4);
+				predictor.VT.entry[vtIdx].no_predict = (predictor.VT.entry[vtIdx].confidence == 8) ? 0 : predictor.VT.entry[vtIdx].no_predict;
+			} else {
+				predictor.VT.entry[vtIdx].confidence = 0;
+				predictor.VT.entry[vtIdx].utility = 0;
+				predictor.VT.entry[vtIdx].no_predict = std::min(predictor.VT.entry[vtIdx].no_predict+1, 4);
+				predictor.VT.entry[vtIdx].data = actual_value;
+			}
 		}
 	} else if (checkLT(pc)) {
 		migrateLTtoVT(pc, seq_no, eligible, actual_value);
@@ -135,10 +165,9 @@ bool checkLT(uint64_t pc) {
 	return (predictor.LT.entry[ltindex].pc == pc);
 }
 
-bool checkVT(uint64_t pc) {
-	uint8_t vtIdx = pc & (VT_SIZE - 1);
+bool checkVT(uint64_t pc, uint8_t index) {
 	// entry is there in the VT
-	return (predictor.VT.entry[vtIdx].tag == bitExtract<uint64_t>(pc, LOG2_VT_SIZE, VT_TAG_SIZE));
+	return (predictor.VT.entry[index].tag == bitExtract<uint64_t>(pc, LOG2_VT_SIZE, VT_TAG_SIZE));
 }
 
 void addToLT(uint64_t pc, InstClass type, uint8_t *source_registers, uint32_t num_src_regs) {
@@ -152,7 +181,7 @@ void addToLT(uint64_t pc, InstClass type, uint8_t *source_registers, uint32_t nu
     we add its sources also in the Learning Table.*/
     bool isCritical = getFromCIT(pc);
 	uint8_t vtIdx = pc & (VT_SIZE - 1);
-	bool isNotPredictableLoad = checkVT(pc) && (predictor.VT.entry[vtIdx].no_predict == 4);
+	bool isNotPredictableLoad = checkVT(pc, vtIdx) && (predictor.VT.entry[vtIdx].no_predict == 4);
 
     if (isCritical || (checkLT(pc) && type != InstClass::loadInstClass) ||
         (type == InstClass::loadInstClass && isNotPredictableLoad)) {
@@ -217,7 +246,7 @@ bool migrateLTtoVT(uint64_t pc, uint64_t seq_no, bool eligible, uint64_t actual_
 	bool migration_complete = false;
 	uint8_t utility = (!eligible) ? 4 : 0; // what do we do for non-load instructions? Set them
 	uint8_t no_predict = (!eligible) ? 4 : 0;
-	if (!checkVT(pc)) {
+	if (!checkVT(pc, vtIdx)) {
 		if (predictor.VT.entry[vtIdx].tag == 0xdeadbeef) {
 			predictor.VT.entry[vtIdx].set(pc, 0, utility, actual_value, no_predict);
 		} else {

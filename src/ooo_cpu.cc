@@ -2177,6 +2177,9 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                     fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
                 }
 
+                // update the global BHR
+                if (ROB.entry[rob_index].is_branch) { updateBHR(ROB.entry[rob_index].branch_taken); }
+
                 // FVP: Instruction is a candidate for being a critical instruction
                 // if its inside the RETIRE WIDTH at this time
                 if (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH) {
@@ -2187,7 +2190,7 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 // Speculatively update the VT as well
                 uint64_t actual_addr = (instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass) ?
                                 ROB.entry[rob_index].destination_memory[0] : 0xdeadbeef;
-                updateVT(false,
+                updateVT(std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH, // distance < retire width
                     (instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass),
                     ROB.entry[rob_index].ip,
                     ROB.entry[rob_index].instr_id,

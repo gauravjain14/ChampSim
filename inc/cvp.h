@@ -157,7 +157,7 @@ void endPredictor();
 
 bool addToCIT(uint64_t pc);
 bool checkLT(uint64_t pc);
-bool checkVT(uint64_t pc);
+bool checkVT(uint64_t pc, uint8_t index);
 bool getFromCIT(uint64_t pc);
 void addToLT(uint8_t src_reg);
 void addToLT(uint64_t pc, InstClass type, uint8_t *source_registers, uint32_t num_src_regs);
