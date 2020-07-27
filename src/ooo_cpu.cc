@@ -508,6 +508,10 @@ void O3_CPU::read_from_trace()
                                 (arch_instr.is_memory && arch_instr.destination_memory[0]) ? InstClass::storeInstClass :
                                                                                                 InstClass::aluInstClass;*/
 
+                // For FVP only load instructions will be eligible
+                eligible = insn == InstClass::loadInstClass;        // FVPChange
+                num_instr_eligible_vp+= (eligible) ? 1: 0;
+
                 // Not accounting for branch instructions; apart from that fp/slowAluInst instrs are only mismatched
                 if (insn != (InstClass)instrTypesCvp[arch_instr.ip]
                         && ((InstClass)instrTypesCvp[arch_instr.ip] != InstClass::fpInstClass &&
@@ -524,74 +528,55 @@ void O3_CPU::read_from_trace()
                 Assumption1: we only have one destination register for any instruction
                 Assumption2: any instruction is going to load from only one memory location at a time */
 
-                // CVP calls getPrediction irrespective of the instruction type
-                bool speculate = getPrediction(arch_instr.instr_id, arch_instr.ip, 0, predicted_value);
-                if (speculate)
-                    num_instr_speculate_vp++;
+                arch_instr.instr_data = 0xcafedead;
 
-                // VP instructions distribution
-                if(speculate) {
-                    if(insn == InstClass::loadInstClass) vp_load++;
-                    else if(insn == InstClass::storeInstClass) vp_store++;
-                    else if(insn == InstClass::aluInstClass || insn == InstClass::fpInstClass || insn == InstClass::slowAluInstClass) vp_alu++;
-                    else vp_branch++;
-                }
-
-                // For FVP only load instructions will be eligible
-                eligible = insn == InstClass::loadInstClass;        // FVPChange
-                num_instr_eligible_vp+= (eligible) ? 1: 0;
-
-                // we'll need to separate out the eligible and speculate clauses
-                // for FVP
+                bool speculate = false;
                 if (eligible) {
-                    if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end()) {
-                        for (auto elem: instrOutValues[arch_instr.instr_id]) {
-                            if (elem.first == arch_instr.destination_registers[0]) {
-                                prediction_result = elem.second == predicted_value;
-                            }
-                        }
+                    speculate = getPrediction(arch_instr.instr_id, arch_instr.ip, 0, predicted_value);
+                    if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end())
                         arch_instr.instr_data = instrOutValues[arch_instr.instr_id][0].second;
-                    } else { // if not present in the trace. Can this ever happen, though?
-                        prediction_result = 2;
+                    else
                         arch_instr.instr_data = 0xcafedead;
-                    }
-                } else {
-                    arch_instr.instr_data = 0xcafedead;
-                }
 
-                if (speculate) {
-                    if (!prediction_result) {
-                        fetch_stall = 1;
-                        arch_instr.value_mispredicted = 1;
-                        continue_reading = 0;
-                        fetch_resume_cycle = 0;
-                        if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass) {
-                            vp_incorrect_mem_executions++;
-#ifdef CVP_DEBUG_PRINT
-                            std::cout << "Stall for " << arch_instr.ip << " due to Memory value misprediction at " <<
-                                        current_core_cycle[cpu] << " cycles" << std::endl;
-#endif
-                        } else {
-#ifdef CVP_DEBUG_PRINT
-                            std::cout << "Stall for " << arch_instr.ip << " due to ALU value misprediction at " <<
-                                        current_core_cycle[cpu] << " cycles" << std::endl;                                                    
-#endif
-                            vp_incorrect_reg_executions++;                                                            
-                        }
-                    } else if (prediction_result) {
-                        if(warmup_complete[cpu]) {
+                    if (speculate && warmup_complete[cpu]) { 
+                        num_instr_speculate_vp++;
+                        if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end()) {
+                            prediction_result = (instrOutValues[arch_instr.instr_id][0].second
+                                                    == predicted_value) ? 1 : 0;
+                        } else
+                            prediction_result = 2;
+
+                        if (prediction_result == 0) {
+                            fetch_stall = 1;
+                            arch_instr.value_mispredicted = 1;
+                            continue_reading = 0;
+                            fetch_resume_cycle = 0;
+                            if (insn == InstClass::loadInstClass ) { //| insn == InstClass::storeInstClass) {
+                                vp_incorrect_mem_executions++;
+    #ifdef CVP_DEBUG_PRINT
+                                std::cout << "Stall for " << arch_instr.ip << " due to Memory value misprediction at " <<
+                                            current_core_cycle[cpu] << " cycles" << std::endl;
+    #endif
+                            } else {
+    #ifdef CVP_DEBUG_PRINT
+                                std::cout << "Stall for " << arch_instr.ip << " due to ALU value misprediction at " <<
+                                            current_core_cycle[cpu] << " cycles" << std::endl;                                                    
+    #endif
+                                vp_incorrect_reg_executions++;                                                            
+                            }
+                        } else if (prediction_result == 1) {
                             arch_instr.value_mispredicted = 0;
-                            if (insn == InstClass::loadInstClass || insn == InstClass::storeInstClass)
+                            if (insn == InstClass::loadInstClass) // || insn == InstClass::storeInstClass)
                                 vp_correct_mem_executions++;
                             else
                                 vp_correct_reg_executions++;
-                        }
-                    } // what do we do for prediction_result == 2
+                        }                        
+                    }
                 }
 
                 next_pc = (arch_instr.is_branch && arch_instr.branch_taken) ?
                                     arch_instr.branch_target : arch_instr.ip + 4;
-                if (arch_instr.destination_registers[0]) {
+                if (eligible && arch_instr.destination_registers[0]) {
                     uint64_t src1 = (uint64_t)arch_instr.source_registers[0];
                     uint64_t src2 = (uint64_t)arch_instr.source_registers[1];
                     uint64_t src3 = (uint64_t)arch_instr.source_registers[2];
@@ -2177,6 +2162,9 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                     fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
                 }
 
+                // update the global BHR
+                if (ROB.entry[rob_index].is_branch) { updateBHR(ROB.entry[rob_index].branch_taken); }
+
                 // FVP: Instruction is a candidate for being a critical instruction
                 // if its inside the RETIRE WIDTH at this time
                 if (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH) {
@@ -2187,7 +2175,7 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 // Speculatively update the VT as well
                 uint64_t actual_addr = (instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass) ?
                                 ROB.entry[rob_index].destination_memory[0] : 0xdeadbeef;
-                updateVT(false,
+                updateVT(std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH, // distance < retire width
                     (instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass),
                     ROB.entry[rob_index].ip,
                     ROB.entry[rob_index].instr_id,

@@ -7,6 +7,7 @@
 #endif
 
 #define CIT_SIZE 32
+#define CT_TAG_SIZE 11
 #define VT_SIZE 64
 #define LOG2_VT_SIZE 6
 #define RAT_SIZE 64
@@ -142,6 +143,8 @@ struct MyPredictor {
 	// Branch history register
 	uint32_t bhr;
 };
+
+void updateBHR(bool taken);
 
 void populateTraceInfo(uint64_t seq_no,			  // dynamic micro-instruction # (starts at 0 and increments indefinitely)
 					   uint8_t prediction_result, // 0: incorrect, 1: correct, 2: unknown (not revealed)
