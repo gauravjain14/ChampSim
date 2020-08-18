@@ -56,7 +56,7 @@ else
     RESULTS_DIR="results_${EXTRA_OPTS}_${N_SIM}M"
 fi
 
-mkdir -p ${RESULTS_DIR}M
+mkdir -p ${RESULTS_DIR}
 
 if [ $USE_GDB = false ]
 then

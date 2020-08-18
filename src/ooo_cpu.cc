@@ -495,11 +495,7 @@ void O3_CPU::read_from_trace()
                     arch_instr.branch_target = next_instr.ip;
                 }
 
-                uint64_t predicted_value;
-                uint8_t prediction_result; // 0: incorrect, 1: correct, 2: unknown (not revealed)
                 bool eligible = false;
-                uint64_t next_pc;
-
                 InstClass insn = (InstClass)instrTypesCvp[arch_instr.ip];
                 /*InstClass insn = (arch_instr.is_branch && arch_instr.branch_type == BRANCH_CONDITIONAL) ? InstClass::condBranchInstClass :
                                 (arch_instr.is_branch && arch_instr.branch_type == BRANCH_DIRECT_JUMP) ? InstClass::uncondDirectBranchInstClass :
@@ -523,69 +519,6 @@ void O3_CPU::read_from_trace()
 #endif
                     num_instr_type_mismatch++;
                 }
-
-                /* This probably includes all ALU and Load instructions because Load will also specify a dest-reg!
-                Assumption1: we only have one destination register for any instruction
-                Assumption2: any instruction is going to load from only one memory location at a time */
-
-                arch_instr.instr_data = 0xcafedead;
-
-                bool speculate = false;
-                if (eligible) {
-                    speculate = getPrediction(arch_instr.instr_id, arch_instr.ip, 0, predicted_value);
-                    if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end())
-                        arch_instr.instr_data = instrOutValues[arch_instr.instr_id][0].second;
-                    else
-                        arch_instr.instr_data = 0xcafedead;
-
-                    if (speculate && warmup_complete[cpu]) { 
-                        num_instr_speculate_vp++;
-                        if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end()) {
-                            prediction_result = (instrOutValues[arch_instr.instr_id][0].second
-                                                    == predicted_value) ? 1 : 0;
-                        } else
-                            prediction_result = 2;
-
-                        if (prediction_result == 0) {
-                            fetch_stall = 1;
-                            arch_instr.value_mispredicted = 1;
-                            continue_reading = 0;
-                            fetch_resume_cycle = 0;
-                            if (insn == InstClass::loadInstClass ) { //| insn == InstClass::storeInstClass) {
-                                vp_incorrect_mem_executions++;
-    #ifdef CVP_DEBUG_PRINT
-                                std::cout << "Stall for " << arch_instr.ip << " due to Memory value misprediction at " <<
-                                            current_core_cycle[cpu] << " cycles" << std::endl;
-    #endif
-                            } else {
-    #ifdef CVP_DEBUG_PRINT
-                                std::cout << "Stall for " << arch_instr.ip << " due to ALU value misprediction at " <<
-                                            current_core_cycle[cpu] << " cycles" << std::endl;                                                    
-    #endif
-                                vp_incorrect_reg_executions++;                                                            
-                            }
-                        } else if (prediction_result == 1) {
-                            arch_instr.value_mispredicted = 0;
-                            if (insn == InstClass::loadInstClass) // || insn == InstClass::storeInstClass)
-                                vp_correct_mem_executions++;
-                            else
-                                vp_correct_reg_executions++;
-                        }                        
-                    }
-                }
-
-                next_pc = (arch_instr.is_branch && arch_instr.branch_taken) ?
-                                    arch_instr.branch_target : arch_instr.ip + 4;
-                if (eligible && arch_instr.destination_registers[0]) {
-                    uint64_t src1 = (uint64_t)arch_instr.source_registers[0];
-                    uint64_t src2 = (uint64_t)arch_instr.source_registers[1];
-                    uint64_t src3 = (uint64_t)arch_instr.source_registers[2];
-                    uint64_t dest = (uint64_t)arch_instr.destination_registers[0];
-                    populateTraceInfo(arch_instr.instr_id, prediction_result,
-                                    arch_instr.ip, next_pc, insn, src1, src2, src3, dest);
-                }
-
-                arch_instr.is_speculative = eligible && speculate;
 #endif
 
                 // add this instruction to the IFETCH_BUFFER
@@ -683,9 +616,6 @@ uint32_t O3_CPU::add_to_rob(ooo_model_instr *arch_instr)
         assert(0);
     }
 #endif
-
-    addToLT(ROB.entry[ROB.head].ip, (InstClass)instrTypesCvp[ROB.entry[index].ip],
-                    ROB.entry[ROB.head].source_registers, NUM_INSTR_SOURCES);
 
     return index;
 }
@@ -1167,8 +1097,6 @@ void O3_CPU::do_scheduling(uint32_t rob_index)
     ROB.entry[rob_index].reg_ready = 1; // reg_ready will be reset to 0 if there is RAW dependency
 
     reg_dependency(rob_index);
-    if (!ROB.entry[rob_index].reg_ready)
-        num_raw_dependencies++;
     ROB.next_schedule = (rob_index == (ROB.SIZE - 1)) ? 0 : (rob_index + 1);
 
     if (ROB.entry[rob_index].is_memory)
@@ -1289,6 +1217,7 @@ void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t sourc
 
         if (ROB.entry[prior].destination_registers[i] == ROB.entry[current].source_registers[source_index])
         {
+            num_raw_dependencies++;
 
             // we need to mark this dependency in the ROB since the producer might not be added in the store queue yet
             ROB.entry[prior].registers_instrs_depend_on_me.insert(current);              // this load cannot be executed until the prior store gets executed
@@ -2157,32 +2086,6 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                     fetch_resume_cycle = current_core_cycle[cpu] + BRANCH_MISPREDICT_PENALTY;
                 }
 
-                if (ROB.entry[rob_index].value_mispredicted && ROB.entry[rob_index].is_speculative)
-                {
-                    fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
-                }
-
-                // update the global BHR
-                if (ROB.entry[rob_index].is_branch) { updateBHR(ROB.entry[rob_index].branch_taken); }
-
-                // FVP: Instruction is a candidate for being a critical instruction
-                // if its inside the RETIRE WIDTH at this time
-                if (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH) {
-                    ROB.entry[rob_index].is_critical = addToCIT(ROB.entry[rob_index].ip);
-                }
-                if (ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
-
-                // Speculatively update the VT as well
-                uint64_t actual_addr = (instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass) ?
-                                ROB.entry[rob_index].destination_memory[0] : 0xdeadbeef;
-                updateVT(std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH, // distance < retire width
-                    (instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass),
-                    ROB.entry[rob_index].ip,
-                    ROB.entry[rob_index].instr_id,
-                    actual_addr,
-                    ROB.entry[rob_index].instr_data,
-                    0);
-
                 DP(if (warmup_complete[cpu]) {
                 cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
                 cout << " is_memory: " << +ROB.entry[rob_index].is_memory << " branch_mispredicted: " << +ROB.entry[rob_index].branch_mispredicted;
@@ -2779,20 +2682,6 @@ void O3_CPU::retire_rob()
                 }
             }
         }
-    
-        // Move call to updatePredictor in complete_execution for speculative update
-        // to the Value Predictor Table
-        /* Okay, this is a bit tricky. How to handle cases with 
-        multiple destination registers? We'll get to  it soon. */
-        /*if (instrOutValues.find(ROB.entry[ROB.head].instr_id) != instrOutValues.end()) {
-            uint64_t actual_addr = (instrTypesCvp[ROB.entry[ROB.head].ip] == InstClass::loadInstClass) ?
-                                ROB.entry[ROB.head].destination_memory[0] : 0xdeadbeef;
-            updatePredictor(ROB.entry[ROB.head].instr_id,
-                            actual_addr,
-                            ROB.entry[ROB.head].instr_data,
-                            0, // send actual execution latency here instead of 0
-                            ROB.entry[ROB.head].is_critical);
-        }*/
 
         ooo_model_instr empty_entry;
         ROB.entry[ROB.head] = empty_entry;

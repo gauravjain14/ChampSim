@@ -551,6 +551,9 @@ int main(int argc, char **argv)
          << "*** ChampSim Multicore Out-of-Order Simulator ***" << endl
          << endl;
 
+    bool use_vp = false;
+    printf("Using Value Prediction %d\n", use_vp);
+
     // initialize knobs
     uint8_t show_heartbeat = 1;
 
