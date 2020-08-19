@@ -551,6 +551,7 @@ void O3_CPU::read_from_trace()
                             arch_instr.value_mispredicted = 1;
                             continue_reading = 0;
                             fetch_resume_cycle = 0;
+                            last_stalled = current_core_cycle[cpu];
                             if (insn == InstClass::loadInstClass ) { //| insn == InstClass::storeInstClass) {
                                 vp_incorrect_mem_executions++;
     #ifdef CVP_DEBUG_PRINT
@@ -826,6 +827,11 @@ void O3_CPU::fetch_instruction()
     {
         fetch_stall = 0;
         fetch_resume_cycle = 0;
+
+        if (last_stalled > 0) {
+            cycles_stalled += (current_core_cycle[cpu] - last_stalled);
+            last_stalled = 0;
+        }
     }
 
     if (IFETCH_BUFFER.occupancy == 0)
@@ -1167,8 +1173,6 @@ void O3_CPU::do_scheduling(uint32_t rob_index)
     ROB.entry[rob_index].reg_ready = 1; // reg_ready will be reset to 0 if there is RAW dependency
 
     reg_dependency(rob_index);
-    if (!ROB.entry[rob_index].reg_ready)
-        num_raw_dependencies++;
     ROB.next_schedule = (rob_index == (ROB.SIZE - 1)) ? 0 : (rob_index + 1);
 
     if (ROB.entry[rob_index].is_memory)
@@ -1245,7 +1249,7 @@ void O3_CPU::reg_dependency(uint32_t rob_index)
         {
             for (int i = prior; i >= (int)ROB.head; i--)
                 // Add condition for registers available due to value predictor
-                if (ROB.entry[i].executed != COMPLETED && !(ROB.entry[i].is_speculative && !ROB.entry[i].value_mispredicted))
+                if (ROB.entry[i].executed != COMPLETED) // && !(ROB.entry[i].is_speculative && !ROB.entry[i].value_mispredicted))
                 {
                     for (uint32_t j = 0; j < NUM_INSTR_SOURCES; j++)
                     {
@@ -1258,7 +1262,7 @@ void O3_CPU::reg_dependency(uint32_t rob_index)
         {
             for (int i = prior; i >= 0; i--)
                 // Add condition for registers available due to value predictor
-                if (ROB.entry[i].executed != COMPLETED && !(ROB.entry[i].is_speculative && !ROB.entry[i].value_mispredicted))
+                if (ROB.entry[i].executed != COMPLETED) // && !(ROB.entry[i].is_speculative && !ROB.entry[i].value_mispredicted))
                 {
                     for (uint32_t j = 0; j < NUM_INSTR_SOURCES; j++)
                     {
@@ -1268,7 +1272,7 @@ void O3_CPU::reg_dependency(uint32_t rob_index)
                 }
             for (int i = ROB.SIZE - 1; i >= (int)ROB.head; i--)
                 // Add condition for registers available due to value predictor
-                if (ROB.entry[i].executed != COMPLETED && !(ROB.entry[i].is_speculative && !ROB.entry[i].value_mispredicted))
+                if (ROB.entry[i].executed != COMPLETED) // && !(ROB.entry[i].is_speculative && !ROB.entry[i].value_mispredicted))
                 {
                     for (uint32_t j = 0; j < NUM_INSTR_SOURCES; j++)
                     {
@@ -1290,20 +1294,26 @@ void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t sourc
         if (ROB.entry[prior].destination_registers[i] == ROB.entry[current].source_registers[source_index])
         {
 
-            // we need to mark this dependency in the ROB since the producer might not be added in the store queue yet
-            ROB.entry[prior].registers_instrs_depend_on_me.insert(current);              // this load cannot be executed until the prior store gets executed
-            ROB.entry[prior].registers_index_depend_on_me[source_index].insert(current); // this load cannot be executed until the prior store gets executed
-            ROB.entry[prior].reg_RAW_producer = 1;
+            if (ROB.entry[prior].is_speculative && !ROB.entry[prior].value_mispredicted)
+                num_raw_dependencies_avoided++;
+            else {
+                num_raw_dependencies++;
 
-            ROB.entry[current].reg_ready = 0;
-            ROB.entry[current].producer_id = ROB.entry[prior].instr_id;
-            ROB.entry[current].num_reg_dependent++;
-            ROB.entry[current].reg_RAW_checked[source_index] = 1;
+                // we need to mark this dependency in the ROB since the producer might not be added in the store queue yet
+                ROB.entry[prior].registers_instrs_depend_on_me.insert(current);              // this load cannot be executed until the prior store gets executed
+                ROB.entry[prior].registers_index_depend_on_me[source_index].insert(current); // this load cannot be executed until the prior store gets executed
+                ROB.entry[prior].reg_RAW_producer = 1;
 
-            DP(if (warmup_complete[cpu]) {
-            cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[current].instr_id << " is_memory: " << +ROB.entry[current].is_memory;
-            cout << " RAW reg_index: " << +ROB.entry[current].source_registers[source_index];
-            cout << " producer_id: " << ROB.entry[prior].instr_id << endl; });
+                ROB.entry[current].reg_ready = 0;
+                ROB.entry[current].producer_id = ROB.entry[prior].instr_id;
+                ROB.entry[current].num_reg_dependent++;
+                ROB.entry[current].reg_RAW_checked[source_index] = 1;
+
+                DP(if (warmup_complete[cpu]) {
+                cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[current].instr_id << " is_memory: " << +ROB.entry[current].is_memory;
+                cout << " RAW reg_index: " << +ROB.entry[current].source_registers[source_index];
+                cout << " producer_id: " << ROB.entry[prior].instr_id << endl; });
+            }
 
 #ifdef CVP_DEBUG_PRINT
             if (ROB.entry[current].is_branch) {

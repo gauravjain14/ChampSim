@@ -63,6 +63,7 @@ public:
   // value prediction
   bool reset_trace_values_file;
   uint32_t num_raw_dependencies;
+  uint32_t num_raw_dependencies_avoided;
   uint32_t num_instr_eligible_vp = 0;
   uint32_t num_instr_speculate_vp = 0;  
   uint32_t vp_correct_reg_executions; // > 4billion instructions?
@@ -70,6 +71,8 @@ public:
   uint32_t vp_incorrect_reg_executions;
   uint32_t vp_incorrect_mem_executions;
   uint32_t num_instr_type_mismatch;
+  uint64_t last_stalled;
+  uint64_t cycles_stalled;
   std::unordered_map<uint8_t, uint32_t> vp_instr_type_pred_count;
   std::vector<std::pair<uint64_t,uint8_t>> eligible_speculate_type;
 
@@ -155,6 +158,7 @@ public:
     // value prediction
     reset_trace_values_file = false;
     num_raw_dependencies = 0;
+    num_raw_dependencies_avoided = 0;
     num_instr_eligible_vp = 0;
     num_instr_speculate_vp = 0;
     vp_correct_reg_executions = 0;
@@ -162,6 +166,8 @@ public:
     vp_correct_mem_executions = 0;
     vp_incorrect_mem_executions = 0;
     num_instr_type_mismatch = 0;
+    last_stalled = 0;
+    cycles_stalled = 0;
 
     // branch
     branch_mispredict_stall_fetch = 0;

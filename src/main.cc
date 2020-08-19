@@ -1031,6 +1031,9 @@ int main(int argc, char **argv)
         cout << "Number of instructions for vp speculation " << ooo_cpu[i].num_instr_speculate_vp << endl;
         cout << "Number of critical instructions " << ooo_cpu[i].num_instr_critical_vp << endl;
         cout << "Number of RAW dependencies " << ooo_cpu[i].num_raw_dependencies << endl;
+        cout << "Number of RAW dependencies avoided " << ooo_cpu[i].num_raw_dependencies_avoided << endl;
+        printf("Percentage of RAW dependencies avoided %f\n",
+            100*(float)ooo_cpu[i].num_raw_dependencies_avoided/(ooo_cpu[i].num_raw_dependencies_avoided + ooo_cpu[i].num_raw_dependencies));
         cout << "Number of times getPrediction is called " << getPredictionCount << endl;
         cout << "Number of times speculativeUpdateCount is called " << speculativeUpdateCount << endl;
         cout << "Number of times updatePredictorCount is called " << updatePredictorCount << endl;
@@ -1044,6 +1047,7 @@ int main(int argc, char **argv)
                                                             ooo_cpu[i].vp_correct_reg_executions << std::endl;
         cout << "Number of Instructions Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions +
                                                             ooo_cpu[i].vp_incorrect_reg_executions << std::endl;
+        cout << " Cycles spent stalling due to VP " << ooo_cpu[i].cycles_stalled << endl;
 
 
         cout << "VP Distribution : Load " << ooo_cpu[i].vp_load << " Store " << ooo_cpu[i].vp_store
