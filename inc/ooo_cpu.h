@@ -241,6 +241,10 @@ public:
       complete_instr_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb),
       complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb);
 
+  // vp verification
+  void check_reg_dependency(uint32_t rob_index);
+  void check_reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t source_index);
+
   void initialize_core();
   void add_load_queue(uint32_t rob_index, uint32_t data_index),
       add_store_queue(uint32_t rob_index, uint32_t data_index),

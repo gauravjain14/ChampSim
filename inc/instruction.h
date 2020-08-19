@@ -175,6 +175,7 @@ class ooo_model_instr {
     // Mark if this instruction is using value prediction
     uint8_t is_speculative;
     uint8_t value_mispredicted;
+    uint8_t check_ready;
 
     // For Focused Value Predictor
     bool is_critical;  // FVPChange
@@ -209,6 +210,7 @@ class ooo_model_instr {
         asid[1] = UINT8_MAX;
 
         is_critical = false; // FVPChange
+        check_ready = 1;
 
 	branch_type = NOT_BRANCH;
 	branch_target = 0;

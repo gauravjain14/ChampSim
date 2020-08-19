@@ -874,13 +874,13 @@ int main(int argc, char **argv)
                 // execute
                 ooo_cpu[i].execute_instruction();
 
-                ooo_cpu[i].update_rob();
+                //ooo_cpu[i].update_rob();
 
                 // memory operation
                 ooo_cpu[i].schedule_memory_instruction();
                 ooo_cpu[i].execute_memory_instruction();
 
-                ooo_cpu[i].update_rob();
+                //ooo_cpu[i].update_rob();
 //#else
 
 

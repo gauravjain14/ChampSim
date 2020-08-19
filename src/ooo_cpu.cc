@@ -495,6 +495,7 @@ void O3_CPU::read_from_trace()
                     arch_instr.branch_target = next_instr.ip;
                 }
 
+#ifdef VALUE_PREDICTION
                 uint64_t predicted_value;
                 uint8_t prediction_result; // 0: incorrect, 1: correct, 2: unknown (not revealed)
                 bool eligible = false;
@@ -587,6 +588,7 @@ void O3_CPU::read_from_trace()
                 }
 
                 arch_instr.is_speculative = eligible && speculate;
+#endif
 #endif
 
                 // add this instruction to the IFETCH_BUFFER
@@ -1168,12 +1170,87 @@ void O3_CPU::schedule_instruction()
     }
 }
 
+void O3_CPU::check_reg_dependency(uint32_t rob_index)
+{
+    // check RAW dependency
+    int prior = rob_index - 1;
+    if (prior < 0)
+        prior = ROB.SIZE - 1;
+
+    if (rob_index != ROB.head)
+    {
+        if ((int)ROB.head <= prior)
+        {
+            for (int i = prior; i >= (int)ROB.head; i--)
+                // Add condition for registers available due to value predictor
+                if (ROB.entry[i].executed != COMPLETED) // && !(ROB.entry[i].is_speculative && !ROB.entry[i].value_mispredicted))
+                {
+                    for (uint32_t j = 0; j < NUM_INSTR_SOURCES; j++)
+                    {
+                        if (ROB.entry[rob_index].source_registers[j] && (ROB.entry[rob_index].reg_RAW_checked[j] == 0))
+                            check_reg_RAW_dependency(i, rob_index, j);
+                    }
+                }
+        }
+        else
+        {
+            for (int i = prior; i >= 0; i--)
+                // Add condition for registers available due to value predictor
+                if (ROB.entry[i].executed != COMPLETED)
+                {
+                    for (uint32_t j = 0; j < NUM_INSTR_SOURCES; j++)
+                    {
+                        if (ROB.entry[rob_index].source_registers[j] && (ROB.entry[rob_index].reg_RAW_checked[j] == 0))
+                            check_reg_RAW_dependency(i, rob_index, j);
+                    }
+                }
+            for (int i = ROB.SIZE - 1; i >= (int)ROB.head; i--)
+                // Add condition for registers available due to value predictor
+                if (ROB.entry[i].executed != COMPLETED)
+                {
+                    for (uint32_t j = 0; j < NUM_INSTR_SOURCES; j++)
+                    {
+                        if (ROB.entry[rob_index].source_registers[j] && (ROB.entry[rob_index].reg_RAW_checked[j] == 0))
+                            check_reg_RAW_dependency(i, rob_index, j);
+                    }
+                }
+        }
+    }
+}
+
+void O3_CPU::check_reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t source_index)
+{
+    for (uint32_t i = 0; i < MAX_INSTR_DESTINATIONS; i++)
+    {
+        if (ROB.entry[prior].destination_registers[i] == 0)
+            continue;
+
+        if (ROB.entry[prior].destination_registers[i] == ROB.entry[current].source_registers[source_index])
+        {
+            ROB.entry[current].check_ready = 0;
+            return;
+        }
+    }
+}
+
 void O3_CPU::do_scheduling(uint32_t rob_index)
 {
-    ROB.entry[rob_index].reg_ready = 1; // reg_ready will be reset to 0 if there is RAW dependency
+    // How many instructions are actually benefitting from VP
+    ROB.entry[rob_index].check_ready = 1;
+    check_reg_dependency(rob_index);
+
+    if(!ROB.entry[rob_index].check_ready)
+        num_raw_dependencies++;
+
+    ROB.entry[rob_index].reg_ready = 1; // reg_ready will be reset to 0 if there is RAW dependency  
 
     reg_dependency(rob_index);
     ROB.next_schedule = (rob_index == (ROB.SIZE - 1)) ? 0 : (rob_index + 1);
+
+    // Thus, VP was helpful
+    if (!ROB.entry[rob_index].check_ready && ROB.entry[rob_index].reg_ready) {
+        num_raw_dependencies_avoided++;    
+    }
 
     if (ROB.entry[rob_index].is_memory)
         ROB.entry[rob_index].scheduled = INFLIGHT;
@@ -1187,13 +1264,6 @@ void O3_CPU::do_scheduling(uint32_t rob_index)
         else
             ROB.entry[rob_index].event_cycle += SCHEDULING_LATENCY;
 
-        /* Don't do this. We want the instruction to go through the execute stage as well. */
-        // ADD LATENCY
-        /*if (ROB.entry[rob_index].event_cycle < current_core_cycle[cpu])
-            ROB.entry[rob_index].event_cycle = current_core_cycle[cpu] + SCHEDULING_LATENCY + (ROB.entry[rob_index].is_speculative)*EXEC_LATENCY;
-        else
-            ROB.entry[rob_index].event_cycle += SCHEDULING_LATENCY + (ROB.entry[rob_index].is_speculative)*EXEC_LATENCY;*/
-
         if (ROB.entry[rob_index].reg_ready)
         {
 
@@ -1201,22 +1271,16 @@ void O3_CPU::do_scheduling(uint32_t rob_index)
             if (RTE1[RTE1_tail] < ROB_SIZE)
                 assert(0);
 #endif
-            
-            // if speculative, not insert into RTE1 and mark it as execution completed?
-            //if (ROB.entry[rob_index].is_speculative) {
-            //    ROB.entry[rob_index].executed = COMPLETED;
-            //} else {
-                // remember this rob_index in the Ready-To-Execute array 1
-                RTE1[RTE1_tail] = rob_index;
 
-                DP(if (warmup_complete[cpu]) {
-                cout << "[RTE1] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id << " rob_index: " << rob_index << " is added to RTE1";
-                cout << " head: " << RTE1_head << " tail: " << RTE1_tail << endl; });
+            RTE1[RTE1_tail] = rob_index;
 
-                RTE1_tail++;
-                if (RTE1_tail == ROB_SIZE)
-                    RTE1_tail = 0;
-            //}
+            DP(if (warmup_complete[cpu]) {
+            cout << "[RTE1] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id << " rob_index: " << rob_index << " is added to RTE1";
+            cout << " head: " << RTE1_head << " tail: " << RTE1_tail << endl; });
+
+            RTE1_tail++;
+            if (RTE1_tail == ROB_SIZE)
+                RTE1_tail = 0;
         }
     }
 }
@@ -1294,11 +1358,10 @@ void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t sourc
         if (ROB.entry[prior].destination_registers[i] == ROB.entry[current].source_registers[source_index])
         {
 
-            if (ROB.entry[prior].is_speculative && !ROB.entry[prior].value_mispredicted)
-                num_raw_dependencies_avoided++;
-            else {
-                num_raw_dependencies++;
-
+#ifdef VALUE_PREDICTION
+            if (!(ROB.entry[prior].is_speculative && !ROB.entry[prior].value_mispredicted))
+#endif
+            {
                 // we need to mark this dependency in the ROB since the producer might not be added in the store queue yet
                 ROB.entry[prior].registers_instrs_depend_on_me.insert(current);              // this load cannot be executed until the prior store gets executed
                 ROB.entry[prior].registers_index_depend_on_me[source_index].insert(current); // this load cannot be executed until the prior store gets executed
@@ -2167,6 +2230,7 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                     fetch_resume_cycle = current_core_cycle[cpu] + BRANCH_MISPREDICT_PENALTY;
                 }
 
+#ifdef VALUE_PREDICTION
                 if (ROB.entry[rob_index].value_mispredicted && ROB.entry[rob_index].is_speculative)
                 {
                     fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
@@ -2192,6 +2256,7 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                     actual_addr,
                     ROB.entry[rob_index].instr_data,
                     0);
+#endif
 
                 DP(if (warmup_complete[cpu]) {
                 cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
