@@ -877,13 +877,13 @@ int main(int argc, char **argv)
                 // execute
                 ooo_cpu[i].execute_instruction();
 
-                ooo_cpu[i].update_rob();
+                //ooo_cpu[i].update_rob();
 
                 // memory operation
                 ooo_cpu[i].schedule_memory_instruction();
                 ooo_cpu[i].execute_memory_instruction();
 
-                ooo_cpu[i].update_rob();
+                //ooo_cpu[i].update_rob();
 //#else
 
 
@@ -1047,6 +1047,7 @@ int main(int argc, char **argv)
                                                             ooo_cpu[i].vp_correct_reg_executions << std::endl;
         cout << "Number of Instructions Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions +
                                                             ooo_cpu[i].vp_incorrect_reg_executions << std::endl;
+        cout << "Number of times Exec under utilised " << ooo_cpu[i].num_exec_under_utilised << endl;
 
 
         cout << "VP Distribution : Load " << ooo_cpu[i].vp_load << " Store " << ooo_cpu[i].vp_store
