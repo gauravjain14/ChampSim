@@ -77,6 +77,7 @@ public:
   std::vector<std::pair<uint64_t,uint8_t>> eligible_speculate_type;
 
   uint32_t num_instr_critical_vp = 0;   // FVPChange
+  uint32_t num_exec_under_utilised = 0;
 
   // Distribution of VP instructions
   uint32_t vp_load = 0;
@@ -168,6 +169,7 @@ public:
     num_instr_type_mismatch = 0;
     last_stalled = 0;
     cycles_stalled = 0;
+    num_exec_under_utilised = 0;
 
     // branch
     branch_mispredict_stall_fetch = 0;

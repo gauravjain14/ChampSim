@@ -1048,7 +1048,7 @@ int main(int argc, char **argv)
         cout << "Number of Instructions Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions +
                                                             ooo_cpu[i].vp_incorrect_reg_executions << std::endl;
         cout << " Cycles spent stalling due to VP " << ooo_cpu[i].cycles_stalled << endl;
-
+        cout << "Number of times Exec under utilised " << ooo_cpu[i].num_exec_under_utilised << endl;
 
         cout << "VP Distribution : Load " << ooo_cpu[i].vp_load << " Store " << ooo_cpu[i].vp_store
                 << " ALU " << ooo_cpu[i].vp_alu << " Branch " << ooo_cpu[i].vp_branch << endl;

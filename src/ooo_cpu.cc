@@ -5,7 +5,7 @@
 // out-of-order core
 O3_CPU ooo_cpu[NUM_CPUS];
 uint64_t current_core_cycle[NUM_CPUS], stall_cycle[NUM_CPUS];
-uint32_t SCHEDULING_LATENCY = 0, EXEC_LATENCY = 0, DECODE_LATENCY = 0;
+uint32_t SCHEDULING_LATENCY = 0, EXEC_LATENCY = 4, DECODE_LATENCY = 0;
 
 extern uint32_t dontUpdatePredictor;
 
@@ -1455,6 +1455,9 @@ void O3_CPU::execute_instruction()
         if (num_iteration == (ROB_SIZE - 1))
             break;
     }
+
+    if (exec_issued < EXEC_WIDTH)
+        num_exec_under_utilised++;
 }
 
 void O3_CPU::do_execution(uint32_t rob_index)
