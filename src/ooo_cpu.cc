@@ -5,7 +5,7 @@
 // out-of-order core
 O3_CPU ooo_cpu[NUM_CPUS];
 uint64_t current_core_cycle[NUM_CPUS], stall_cycle[NUM_CPUS];
-uint32_t SCHEDULING_LATENCY = 0, EXEC_LATENCY = 4, DECODE_LATENCY = 0;
+uint32_t SCHEDULING_LATENCY = 0, EXEC_LATENCY = 0, DECODE_LATENCY = 0;
 
 extern uint32_t dontUpdatePredictor;
 
@@ -543,7 +543,7 @@ void O3_CPU::read_from_trace()
                         num_instr_speculate_vp++;
                         if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end()) {
                             prediction_result = (instrOutValues[arch_instr.instr_id][0].second
-                                                    == predicted_value) ? 1 : 0;
+                                                    == predicted_value);
                         } else
                             prediction_result = 2;
 
@@ -1130,8 +1130,11 @@ void O3_CPU::schedule_instruction()
         return;
 
     // execution is out-of-order but we have an in-order scheduling algorithm to detect all RAW dependencies
-    uint32_t limit = ROB.next_fetch[1];
+    
+    // This looks like a bug. next_fetch is never updated and always 0. 
+    uint32_t limit = ROB.tail; // ROB.next_fetch[1];
     num_searched = 0;
+    actual_scheduled = 0;
     if (ROB.head < limit)
     {
         for (uint32_t i = ROB.head; i < limit; i++)
@@ -1139,8 +1142,10 @@ void O3_CPU::schedule_instruction()
             if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE))
                 return;
 
-            if (ROB.entry[i].scheduled == 0)
+            if (ROB.entry[i].scheduled == 0) {
+                actual_scheduled++;
                 do_scheduling(i);
+            }
 
             num_searched++;
         }
@@ -1152,8 +1157,10 @@ void O3_CPU::schedule_instruction()
             if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE))
                 return;
 
-            if (ROB.entry[i].scheduled == 0)
+            if (ROB.entry[i].scheduled == 0) {
+                actual_scheduled++;
                 do_scheduling(i);
+            }
 
             num_searched++;
         }
@@ -1162,12 +1169,16 @@ void O3_CPU::schedule_instruction()
             if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE))
                 return;
 
-            if (ROB.entry[i].scheduled == 0)
+            if (ROB.entry[i].scheduled == 0) {
+                actual_scheduled++;
                 do_scheduling(i);
+            }
 
             num_searched++;
         }
     }
+
+    avg_actual_scheduled += (actual_scheduled - avg_actual_scheduled)/(current_core_cycle[cpu]+1);
 }
 
 void O3_CPU::check_reg_dependency(uint32_t rob_index)
@@ -1248,8 +1259,9 @@ void O3_CPU::do_scheduling(uint32_t rob_index)
     ROB.next_schedule = (rob_index == (ROB.SIZE - 1)) ? 0 : (rob_index + 1);
 
     // Thus, VP was helpful
-    if (!ROB.entry[rob_index].check_ready && ROB.entry[rob_index].reg_ready) {
-        num_raw_dependencies_avoided++;    
+    if (!ROB.entry[rob_index].check_ready && ROB.entry[rob_index].reg_ready &&
+        ((InstClass)instrTypesCvp[ROB.entry[rob_index].ip] != InstClass::loadInstClass)) {
+        num_raw_dependencies_avoided++;
     }
 
     if (ROB.entry[rob_index].is_memory)
@@ -1358,9 +1370,9 @@ void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t sourc
         if (ROB.entry[prior].destination_registers[i] == ROB.entry[current].source_registers[source_index])
         {
 
-#ifdef VALUE_PREDICTION
+//#ifdef VALUE_PREDICTION
             if (!(ROB.entry[prior].is_speculative && !ROB.entry[prior].value_mispredicted))
-#endif
+//#endif
             {
                 // we need to mark this dependency in the ROB since the producer might not be added in the store queue yet
                 ROB.entry[prior].registers_instrs_depend_on_me.insert(current);              // this load cannot be executed until the prior store gets executed
@@ -1376,16 +1388,10 @@ void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t sourc
                 cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[current].instr_id << " is_memory: " << +ROB.entry[current].is_memory;
                 cout << " RAW reg_index: " << +ROB.entry[current].source_registers[source_index];
                 cout << " producer_id: " << ROB.entry[prior].instr_id << endl; });
+            
+                return;
             }
 
-#ifdef CVP_DEBUG_PRINT
-            if (ROB.entry[current].is_branch) {
-                printf(" Branch PC %#x type: %d is dependent on %#x for Reg %d\n",
-                    ROB.entry[current].ip,instrTypesCvp[ROB.entry[current].ip],
-                    ROB.entry[prior].ip, ROB.entry[current].source_registers[source_index]);
-            }
-#endif
-            return;
         }
     }
 }
@@ -1394,6 +1400,8 @@ void O3_CPU::execute_instruction()
 {
     if ((ROB.head == ROB.tail) && ROB.occupancy == 0)
         return;
+
+    num_times_execute_called++;
 
     // out-of-order execution for non-memory instructions
     // memory instructions are handled by memory_instruction()
@@ -1456,7 +1464,9 @@ void O3_CPU::execute_instruction()
             break;
     }
 
-    if (exec_issued < EXEC_WIDTH)
+    avg_exec_utilisation += (exec_issued - avg_exec_utilisation)/num_times_execute_called;
+
+    if (exec_issued == 0)
         num_exec_under_utilised++;
 }
 

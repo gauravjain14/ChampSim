@@ -301,6 +301,9 @@ public:
         lsq_event_cycle,
         retire_event_cycle;
 
+    bool from_speculation;
+    uint32_t from_speculation_idx;
+
     ooo_model_instr *entry;
 
     // constructor
@@ -328,6 +331,9 @@ public:
         retire_event_cycle = UINT64_MAX;
 
         entry = new ooo_model_instr[SIZE];
+
+        from_speculation = false;
+        from_speculation_idx = UINT32_MAX;
     };
 
     // destructor
