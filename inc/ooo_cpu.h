@@ -18,7 +18,7 @@ using namespace std;
 #define EXEC_WIDTH 6
 #define LQ_WIDTH 2
 #define SQ_WIDTH 2
-#define RETIRE_WIDTH 4
+#define RETIRE_WIDTH 6
 #define SCHEDULER_SIZE 128
 #define BRANCH_MISPREDICT_PENALTY 1
 #define VALUE_MISPREDICT_PENALTY 10
@@ -75,6 +75,10 @@ public:
 
   uint32_t num_instr_critical_vp = 0;   // FVPChange
   uint32_t num_exec_under_utilised = 0;
+  uint32_t num_times_execute_called = 0;
+  float avg_exec_utilisation;
+  uint32_t actual_scheduled;
+  float avg_actual_scheduled;
 
   // Distribution of VP instructions
   uint32_t vp_load = 0;
@@ -164,6 +168,9 @@ public:
     vp_incorrect_mem_executions = 0;
     num_instr_type_mismatch = 0;
     num_exec_under_utilised = 0;
+    avg_exec_utilisation = 0.0;
+    actual_scheduled = 0;
+    avg_actual_scheduled = 0.0;
 
     // branch
     branch_mispredict_stall_fetch = 0;
