@@ -958,6 +958,12 @@ int main(int argc, char** argv)
 #endif
         print_roi_stats(i, &uncore.LLC);
         cout << "Major fault: " << major_fault[i] << " Minor fault: " << minor_fault[i] << endl;
+
+        cout << "Number of times Exec under utilised " << ooo_cpu[i].num_exec_under_utilised << endl;
+        cout << "Number of times Exec called " << ooo_cpu[i].num_times_execute_called << endl;
+        cout << "Avg exec utilisation " << ooo_cpu[i].avg_exec_utilisation << endl;
+        cout << "Avg actually scheduled " << ooo_cpu[i].avg_actual_scheduled << endl;
+
     }
 
     for (uint32_t i=0; i<NUM_CPUS; i++) {

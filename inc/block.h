@@ -338,6 +338,8 @@ class LSQ_ENTRY {
              ip,
              event_cycle;
 
+    uint64_t instr_data;
+
     uint32_t rob_index, data_index, sq_index;
 
     uint8_t translated,
@@ -365,6 +367,7 @@ class LSQ_ENTRY {
         asid[0] = UINT8_MAX;
         asid[1] = UINT8_MAX;
 
+        instr_data = 0;
 #if 0
         for (uint32_t i=0; i<ROB_SIZE; i++)
             forwarding_depend_on_me[i] = 0;
