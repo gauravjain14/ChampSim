@@ -110,6 +110,8 @@ class ooo_model_instr {
              retired_cycle,
              event_cycle;
 
+    uint64_t instr_data;
+
     uint8_t is_branch,
             is_memory,
             branch_taken,
