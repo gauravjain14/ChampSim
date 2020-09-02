@@ -7,8 +7,8 @@ binDir = bin
 inc = inc
 
 debug = 1
-
-CFlags = -Wall -O3 -std=c++11
+#-D DEBUG_PRINT
+CFlags = -Wall -O3 -std=c++11 -g -D CVP_TRACE -D VALUE_PREDICTION # -D CVP_DEBUG_PRINT # -D DEBUG_PRINT#
 LDFlags =
 libs =
 libDir =

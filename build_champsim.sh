@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [ "$#" -ne 7 ]; then
+if [ "$#" -lt 7 ]; then
     echo "Illegal number of parameters"
     echo "Usage: ./build_champsim.sh [branch_pred] [l1d_pref] [l2c_pref] [llc_pref] [llc_repl] [num_core]"
     exit 1
@@ -14,6 +14,7 @@ L2C_PREFETCHER=$4   # prefetcher/*.l2c_pref
 LLC_PREFETCHER=$5   # prefetcher/*.llc_pref
 LLC_REPLACEMENT=$6  # replacement/*.llc_repl
 NUM_CORE=$7         # tested up to 8-core system
+ENABLE_VP=$8
 
 ############## Some useful macros ###############
 BOLD=$(tput bold)

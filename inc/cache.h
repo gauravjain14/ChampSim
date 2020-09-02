@@ -2,6 +2,8 @@
 #define CACHE_H
 
 #include "memory_class.h"
+#include "cvp.h"
+#include "focused_vp.h"
 
 // PAGE
 extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;

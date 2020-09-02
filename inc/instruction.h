@@ -26,6 +26,7 @@
 #define BRANCH_OTHER         7
 
 #include "set.h"
+#include <unordered_map>
 
 class input_instr {
   public:
@@ -170,6 +171,14 @@ class ooo_model_instr {
              sq_index[NUM_INSTR_DESTINATIONS_SPARC],
              forwarding_index[NUM_INSTR_DESTINATIONS_SPARC];
 
+    // Mark if this instruction is using value prediction
+    uint8_t is_speculative;
+    uint8_t value_mispredicted;
+    uint8_t check_ready;
+
+    // For Focused Value Predictor
+    bool is_critical;  // FVPChange
+
     ooo_model_instr() {
         instr_id = 0;
         ip = 0;
@@ -194,6 +203,9 @@ class ooo_model_instr {
         asid[0] = UINT8_MAX;
         asid[1] = UINT8_MAX;
 
+        is_critical = false; // FVPChange
+        check_ready = 1;
+
 	branch_type = NOT_BRANCH;
 	branch_target = 0;
 
@@ -205,6 +217,9 @@ class ooo_model_instr {
         num_reg_ops = 0;
         num_mem_ops = 0;
         num_reg_dependent = 0;
+
+        is_speculative = 0;
+        value_mispredicted = 0;
 
         for (uint32_t i=0; i<NUM_INSTR_SOURCES; i++) {
             source_registers[i] = 0;

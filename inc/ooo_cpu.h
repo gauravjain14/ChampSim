@@ -25,6 +25,7 @@ using namespace std;
 #define RETIRE_WIDTH 5
 #define SCHEDULER_SIZE 128
 #define BRANCH_MISPREDICT_PENALTY 1
+#define VALUE_MISPREDICT_PENALTY 10
 //#define SCHEDULING_LATENCY 0
 //#define EXEC_LATENCY 0
 //#define DECODE_LATENCY 2
@@ -36,6 +37,10 @@ using namespace std;
 #define STA_SIZE (ROB_SIZE * NUM_INSTR_DESTINATIONS_SPARC)
 
 extern uint32_t SCHEDULING_LATENCY, EXEC_LATENCY, DECODE_LATENCY;
+
+extern FILE *mem_fp;
+extern FILE *instr_fp;
+extern FILE *cvp_values_fp;
 
 // cpu
 class O3_CPU
@@ -241,7 +246,9 @@ public:
       do_execution(uint32_t rob_index),
       do_memory_scheduling(uint32_t rob_index),
       operate_lsq();
+  
   uint32_t complete_execution(uint32_t rob_index);
+  
   void reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t source_index),
       reg_RAW_release(uint32_t rob_index),
       mem_RAW_dependency(uint32_t prior, uint32_t current, uint32_t data_index, uint32_t lq_index),
@@ -251,6 +258,10 @@ public:
       release_load_queue(uint32_t lq_index),
       complete_instr_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb),
       complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb);
+
+  // vp verification
+  void check_reg_dependency(uint32_t rob_index);
+  void check_reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t source_index);
 
   void initialize_core();
   void add_load_queue(uint32_t rob_index, uint32_t data_index),
@@ -262,9 +273,11 @@ public:
   void update_rob();
   void retire_rob();
 
-  uint32_t check_rob(uint64_t instr_id);
+  uint32_t add_to_rob(ooo_model_instr *arch_instr),
+      check_rob(uint64_t instr_id);
 
   uint32_t add_to_ifetch_buffer(ooo_model_instr *arch_instr);
+  uint32_t add_to_decode_buffer(ooo_model_instr *arch_instr);
 
   uint32_t check_and_add_lsq(uint32_t rob_index);
 

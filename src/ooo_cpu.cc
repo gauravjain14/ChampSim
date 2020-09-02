@@ -2,11 +2,14 @@
 
 #include "ooo_cpu.h"
 #include "set.h"
+#include <cstdlib>
 
 // out-of-order core
 O3_CPU ooo_cpu[NUM_CPUS];
 uint64_t current_core_cycle[NUM_CPUS], stall_cycle[NUM_CPUS];
 uint32_t SCHEDULING_LATENCY = 0, EXEC_LATENCY = 0, DECODE_LATENCY = 0;
+
+extern uint32_t dontUpdatePredictor;
 
 void O3_CPU::initialize_core()
 {
@@ -331,17 +334,12 @@ void O3_CPU::read_from_trace()
                         break;
                     }
 
-                    /*
-		    if((!arch_instr.is_branch) && (arch_instr.source_registers[i] > 25) && (arch_instr.source_registers[i] < 28))
-		      {
-			arch_instr.source_registers[i] = 0;
-		      }
-		    */
-
                     if (arch_instr.source_registers[i])
                         num_reg_ops++;
                     if (arch_instr.source_memory[i])
+                    {
                         num_mem_ops++;
+                    }
                 }
 
                 arch_instr.num_reg_ops = num_reg_ops;
@@ -504,7 +502,12 @@ void O3_CPU::read_from_trace()
                     arch_instr.branch_target = next_instr.ip;
                 }
 
+#ifdef VALUE_PREDICTION
+                uint64_t predicted_value;
+                uint8_t prediction_result; // 0: incorrect, 1: correct, 2: unknown (not revealed)
                 bool eligible = false;
+                uint64_t next_pc;
+
                 InstClass insn = (InstClass)instrTypesCvp[arch_instr.ip];
                 /*InstClass insn = (arch_instr.is_branch && arch_instr.branch_type == BRANCH_CONDITIONAL) ? InstClass::condBranchInstClass :
                                 (arch_instr.is_branch && arch_instr.branch_type == BRANCH_DIRECT_JUMP) ? InstClass::uncondDirectBranchInstClass :
@@ -528,6 +531,71 @@ void O3_CPU::read_from_trace()
 #endif
                     num_instr_type_mismatch++;
                 }
+
+                /* This probably includes all ALU and Load instructions because Load will also specify a dest-reg!
+                Assumption1: we only have one destination register for any instruction
+                Assumption2: any instruction is going to load from only one memory location at a time */
+
+                arch_instr.instr_data = 0xcafedead;
+
+                bool speculate = false;
+                if (eligible) {
+                    speculate = getPrediction(arch_instr.instr_id, arch_instr.ip, 0, predicted_value);
+                    if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end())
+                        arch_instr.instr_data = instrOutValues[arch_instr.instr_id][0].second;
+                    else
+                        arch_instr.instr_data = 0xcafedead;
+
+                    if (speculate && warmup_complete[cpu]) { 
+                        num_instr_speculate_vp++;
+                        if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end()) {
+                            prediction_result = (instrOutValues[arch_instr.instr_id][0].second
+                                                    == predicted_value);
+                        } else
+                            prediction_result = 2;
+
+                        if (prediction_result == 0) {
+                            fetch_stall = 1;
+                            arch_instr.value_mispredicted = 1;
+                            continue_reading = 0;
+                            fetch_resume_cycle = 0;
+                            last_stalled = current_core_cycle[cpu];
+                            if (insn == InstClass::loadInstClass ) { //| insn == InstClass::storeInstClass) {
+                                vp_incorrect_mem_executions++;
+    #ifdef CVP_DEBUG_PRINT
+                                std::cout << "Stall for " << arch_instr.ip << " due to Memory value misprediction at " <<
+                                            current_core_cycle[cpu] << " cycles" << std::endl;
+    #endif
+                            } else {
+    #ifdef CVP_DEBUG_PRINT
+                                std::cout << "Stall for " << arch_instr.ip << " due to ALU value misprediction at " <<
+                                            current_core_cycle[cpu] << " cycles" << std::endl;                                                    
+    #endif
+                                vp_incorrect_reg_executions++;                                                            
+                            }
+                        } else if (prediction_result == 1) {
+                            arch_instr.value_mispredicted = 0;
+                            if (insn == InstClass::loadInstClass) // || insn == InstClass::storeInstClass)
+                                vp_correct_mem_executions++;
+                            else
+                                vp_correct_reg_executions++;
+                        }                        
+                    }
+                }
+
+                next_pc = (arch_instr.is_branch && arch_instr.branch_taken) ?
+                                    arch_instr.branch_target : arch_instr.ip + 4;
+                if (eligible && arch_instr.destination_registers[0]) {
+                    uint64_t src1 = (uint64_t)arch_instr.source_registers[0];
+                    uint64_t src2 = (uint64_t)arch_instr.source_registers[1];
+                    uint64_t src3 = (uint64_t)arch_instr.source_registers[2];
+                    uint64_t dest = (uint64_t)arch_instr.destination_registers[0];
+                    populateTraceInfo(arch_instr.instr_id, prediction_result,
+                                    arch_instr.ip, next_pc, insn, src1, src2, src3, dest);
+                }
+
+                arch_instr.is_speculative = eligible && speculate;
+#endif
 #endif
 
                 // add this instruction to the IFETCH_BUFFER
@@ -583,7 +651,7 @@ void O3_CPU::read_from_trace()
                     if ((num_reads >= instrs_to_read_this_cycle) || (IFETCH_BUFFER.occupancy == IFETCH_BUFFER.SIZE))
                         continue_reading = 0;
                 }
-                instr_unique_id++;
+                instr_unique_id++;             
             }
         }
     }
@@ -703,6 +771,11 @@ void O3_CPU::fetch_instruction()
     {
         fetch_stall = 0;
         fetch_resume_cycle = 0;
+
+        if (last_stalled > 0) {
+            cycles_stalled += (current_core_cycle[cpu] - last_stalled);
+            last_stalled = 0;
+        }
     }
 
     if (IFETCH_BUFFER.occupancy == 0)
@@ -890,6 +963,9 @@ void O3_CPU::decode_and_dispatch()
         ROB.entry[ROB.tail] = DECODE_BUFFER.entry[DECODE_BUFFER.head];
         ROB.entry[ROB.tail].event_cycle = current_core_cycle[cpu];
 
+        ooo_model_instr &tmp = DECODE_BUFFER.entry[DECODE_BUFFER.head];
+        addToLT(tmp.ip, (InstClass)instrTypesCvp[tmp.ip], tmp.source_registers, NUM_INSTR_SOURCES);
+
         ROB.tail++;
         if (ROB.tail >= ROB.SIZE)
             ROB.tail = 0;
@@ -1028,11 +1104,87 @@ void O3_CPU::schedule_instruction()
     avg_actual_scheduled += (actual_scheduled - avg_actual_scheduled)/(current_core_cycle[cpu]+1);
 }
 
+void O3_CPU::check_reg_dependency(uint32_t rob_index)
+{
+    // check RAW dependency
+    int prior = rob_index - 1;
+    if (prior < 0)
+        prior = ROB.SIZE - 1;
+
+    if (rob_index != ROB.head)
+    {
+        if ((int)ROB.head <= prior)
+        {
+            for (int i = prior; i >= (int)ROB.head; i--)
+                // Add condition for registers available due to value predictor
+                if (ROB.entry[i].executed != COMPLETED) // && !(ROB.entry[i].is_speculative && !ROB.entry[i].value_mispredicted))
+                {
+                    for (uint32_t j = 0; j < NUM_INSTR_SOURCES; j++)
+                    {
+                        if (ROB.entry[rob_index].source_registers[j] && (ROB.entry[rob_index].reg_RAW_checked[j] == 0))
+                            check_reg_RAW_dependency(i, rob_index, j);
+                    }
+                }
+        }
+        else
+        {
+            for (int i = prior; i >= 0; i--)
+                // Add condition for registers available due to value predictor
+                if (ROB.entry[i].executed != COMPLETED)
+                {
+                    for (uint32_t j = 0; j < NUM_INSTR_SOURCES; j++)
+                    {
+                        if (ROB.entry[rob_index].source_registers[j] && (ROB.entry[rob_index].reg_RAW_checked[j] == 0))
+                            check_reg_RAW_dependency(i, rob_index, j);
+                    }
+                }
+            for (int i = ROB.SIZE - 1; i >= (int)ROB.head; i--)
+                // Add condition for registers available due to value predictor
+                if (ROB.entry[i].executed != COMPLETED)
+                {
+                    for (uint32_t j = 0; j < NUM_INSTR_SOURCES; j++)
+                    {
+                        if (ROB.entry[rob_index].source_registers[j] && (ROB.entry[rob_index].reg_RAW_checked[j] == 0))
+                            check_reg_RAW_dependency(i, rob_index, j);
+                    }
+                }
+        }
+    }
+}
+
+void O3_CPU::check_reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t source_index)
+{
+    for (uint32_t i = 0; i < MAX_INSTR_DESTINATIONS; i++)
+    {
+        if (ROB.entry[prior].destination_registers[i] == 0)
+            continue;
+
+        if (ROB.entry[prior].destination_registers[i] == ROB.entry[current].source_registers[source_index])
+        {
+            ROB.entry[current].check_ready = 0;
+            return;
+        }
+    }
+}
+
 void O3_CPU::do_scheduling(uint32_t rob_index)
 {
-    ROB.entry[rob_index].reg_ready = 1; // reg_ready will be reset to 0 if there is RAW dependency
+    // How many instructions are actually benefitting from VP
+    ROB.entry[rob_index].check_ready = 1;
+    check_reg_dependency(rob_index);
+
+    if(!ROB.entry[rob_index].check_ready)
+        num_raw_dependencies++;
+
+    ROB.entry[rob_index].reg_ready = 1; // reg_ready will be reset to 0 if there is RAW dependency  
 
     reg_dependency(rob_index);
+
+    // Thus, VP was helpful
+    if (!ROB.entry[rob_index].check_ready && ROB.entry[rob_index].reg_ready &&
+        ((InstClass)instrTypesCvp[ROB.entry[rob_index].ip] != InstClass::loadInstClass)) {
+        num_raw_dependencies_avoided++;
+    }
 
     if (ROB.entry[rob_index].is_memory)
         ROB.entry[rob_index].scheduled = INFLIGHT;
@@ -1094,7 +1246,8 @@ void O3_CPU::reg_dependency(uint32_t rob_index)
         if ((int)ROB.head <= prior)
         {
             for (int i = prior; i >= (int)ROB.head; i--)
-                if (ROB.entry[i].executed != COMPLETED)
+                // Add condition for registers available due to value predictor
+                if (ROB.entry[i].executed != COMPLETED) // && !(ROB.entry[i].is_speculative && !ROB.entry[i].value_mispredicted))
                 {
                     for (uint32_t j = 0; j < NUM_INSTR_SOURCES; j++)
                     {
@@ -1106,7 +1259,8 @@ void O3_CPU::reg_dependency(uint32_t rob_index)
         else
         {
             for (int i = prior; i >= 0; i--)
-                if (ROB.entry[i].executed != COMPLETED)
+                // Add condition for registers available due to value predictor
+                if (ROB.entry[i].executed != COMPLETED) // && !(ROB.entry[i].is_speculative && !ROB.entry[i].value_mispredicted))
                 {
                     for (uint32_t j = 0; j < NUM_INSTR_SOURCES; j++)
                     {
@@ -1115,7 +1269,8 @@ void O3_CPU::reg_dependency(uint32_t rob_index)
                     }
                 }
             for (int i = ROB.SIZE - 1; i >= (int)ROB.head; i--)
-                if (ROB.entry[i].executed != COMPLETED)
+                // Add condition for registers available due to value predictor
+                if (ROB.entry[i].executed != COMPLETED)// && !(ROB.entry[i].is_speculative && !ROB.entry[i].value_mispredicted))
                 {
                     for (uint32_t j = 0; j < NUM_INSTR_SOURCES; j++)
                     {
@@ -1137,22 +1292,28 @@ void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t sourc
         if (ROB.entry[prior].destination_registers[i] == ROB.entry[current].source_registers[source_index])
         {
 
-            // we need to mark this dependency in the ROB since the producer might not be added in the store queue yet
-            ROB.entry[prior].registers_instrs_depend_on_me.insert(current);              // this load cannot be executed until the prior store gets executed
-            ROB.entry[prior].registers_index_depend_on_me[source_index].insert(current); // this load cannot be executed until the prior store gets executed
-            ROB.entry[prior].reg_RAW_producer = 1;
+//#ifdef VALUE_PREDICTION
+            if (!(ROB.entry[prior].is_speculative && !ROB.entry[prior].value_mispredicted))
+//#endif
+            {
+                // we need to mark this dependency in the ROB since the producer might not be added in the store queue yet
+                ROB.entry[prior].registers_instrs_depend_on_me.insert(current);              // this load cannot be executed until the prior store gets executed
+                ROB.entry[prior].registers_index_depend_on_me[source_index].insert(current); // this load cannot be executed until the prior store gets executed
+                ROB.entry[prior].reg_RAW_producer = 1;
 
-            ROB.entry[current].reg_ready = 0;
-            ROB.entry[current].producer_id = ROB.entry[prior].instr_id;
-            ROB.entry[current].num_reg_dependent++;
-            ROB.entry[current].reg_RAW_checked[source_index] = 1;
+                ROB.entry[current].reg_ready = 0;
+                ROB.entry[current].producer_id = ROB.entry[prior].instr_id;
+                ROB.entry[current].num_reg_dependent++;
+                ROB.entry[current].reg_RAW_checked[source_index] = 1;
 
-            DP(if (warmup_complete[cpu]) {
-            cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[current].instr_id << " is_memory: " << +ROB.entry[current].is_memory;
-            cout << " RAW reg_index: " << +ROB.entry[current].source_registers[source_index];
-            cout << " producer_id: " << ROB.entry[prior].instr_id << endl; });
+                DP(if (warmup_complete[cpu]) {
+                cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[current].instr_id << " is_memory: " << +ROB.entry[current].is_memory;
+                cout << " RAW reg_index: " << +ROB.entry[current].source_registers[source_index];
+                cout << " producer_id: " << ROB.entry[prior].instr_id << endl; });
 
-            return;
+                return;
+            }
+
         }
     }
 }
@@ -1599,6 +1760,7 @@ void O3_CPU::add_store_queue(uint32_t rob_index, uint32_t data_index)
 
     SQ.occupancy++;
     SQ.tail++;
+
     if (SQ.tail == SQ.SIZE)
         SQ.tail = 0;
 
@@ -1633,7 +1795,6 @@ void O3_CPU::operate_lsq()
             uint32_t sq_index = RTS0[RTS0_head];
             if (SQ.entry[sq_index].event_cycle <= current_core_cycle[cpu])
             {
-
                 // add it to DTLB
                 PACKET data_packet;
 
@@ -1944,6 +2105,11 @@ uint32_t O3_CPU::complete_execution(uint32_t rob_index)
                 fetch_resume_cycle = current_core_cycle[cpu] + BRANCH_MISPREDICT_PENALTY;
             }
 
+            if (ROB.entry[rob_index].value_mispredicted && ROB.entry[rob_index].is_speculative)
+            {
+                fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
+            }
+
             DP(if (warmup_complete[cpu]) {
             cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
             cout << " branch_mispredicted: " << +ROB.entry[rob_index].branch_mispredicted << " fetch_stall: " << +fetch_stall;
@@ -1970,6 +2136,34 @@ uint32_t O3_CPU::complete_execution(uint32_t rob_index)
                 {
                     fetch_resume_cycle = current_core_cycle[cpu] + BRANCH_MISPREDICT_PENALTY;
                 }
+
+#ifdef VALUE_PREDICTION
+                if (ROB.entry[rob_index].value_mispredicted && ROB.entry[rob_index].is_speculative)
+                {
+                    fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
+                }
+
+                // update the global BHR
+                if (ROB.entry[rob_index].is_branch) { updateBHR(ROB.entry[rob_index].branch_taken); }
+
+                // FVP: Instruction is a candidate for being a critical instruction
+                // if its inside the RETIRE WIDTH at this time
+                if (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH) {
+                    ROB.entry[rob_index].is_critical = addToCIT(ROB.entry[rob_index].ip);
+                }
+                if (ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
+
+                // Speculatively update the VT as well
+                uint64_t actual_addr = (instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass) ?
+                                ROB.entry[rob_index].destination_memory[0] : 0xdeadbeef;
+                updateVT(std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH, // distance < retire width
+                    (instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass),
+                    ROB.entry[rob_index].ip,
+                    ROB.entry[rob_index].instr_id,
+                    actual_addr,
+                    ROB.entry[rob_index].instr_data,
+                    0);
+#endif
 
                 DP(if (warmup_complete[cpu]) {
                 cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
