@@ -1050,6 +1050,7 @@ int main(int argc, char **argv)
 
 #ifdef CVP_TRACE
         cout << "Value Predictor Statistics " << endl;
+        endPredictor();
         cout << "Number of instruction type mismatches " << ooo_cpu[i].num_instr_type_mismatch << endl;
         cout << "Number of instructions eligible for vp " << ooo_cpu[i].num_instr_eligible_vp << endl;
         cout << "Number of instructions for vp speculation " << ooo_cpu[i].num_instr_speculate_vp << endl;
@@ -1058,10 +1059,10 @@ int main(int argc, char **argv)
         cout << "Number of RAW dependencies avoided " << ooo_cpu[i].num_raw_dependencies_avoided << endl;
         printf("Percentage of RAW dependencies avoided %f\n",
             100 * (float)ooo_cpu[i].num_raw_dependencies_avoided / (ooo_cpu[i].num_raw_dependencies_avoided + ooo_cpu[i].num_raw_dependencies));
-        cout << "Number of times getPrediction is called " << getPredictionCount << endl;
-        cout << "Number of times speculativeUpdateCount is called " << speculativeUpdateCount << endl;
-        cout << "Number of times updatePredictorCount is called " << updatePredictorCount << endl;
-        cout << "Number of times didn't call updatePredictorCount " << dontUpdatePredictor << endl;
+        //cout << "Number of times getPrediction is called " << getPredictionCount << endl;
+        //cout << "Number of times speculativeUpdateCount is called " << speculativeUpdateCount << endl;
+        //cout << "Number of times updatePredictorCount is called " << updatePredictorCount << endl;
+        //cout << "Number of times didn't call updatePredictorCount " << dontUpdatePredictor << endl;
         cout << "Number of entries in instrOutValues " << ooo_cpu[i].instrOutValues.size() << endl;
         cout << "Number of Memory Operations Predicted Correct " << ooo_cpu[i].vp_correct_mem_executions << endl;
         cout << "Number of Memory Operations Predicted Incorrect " << ooo_cpu[i].vp_incorrect_mem_executions << endl;

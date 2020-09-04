@@ -504,6 +504,7 @@ void O3_CPU::read_from_trace()
 
 #ifdef VALUE_PREDICTION
                 uint64_t predicted_value;
+                bool lvp_not_cvp;
                 uint8_t prediction_result; // 0: incorrect, 1: correct, 2: unknown (not revealed)
                 bool eligible = false;
                 uint64_t next_pc;
@@ -540,7 +541,7 @@ void O3_CPU::read_from_trace()
 
                 bool speculate = false;
                 if (eligible) {
-                    speculate = getPrediction(arch_instr.instr_id, arch_instr.ip, 0, predicted_value);
+                    speculate = getPrediction(arch_instr.instr_id, arch_instr.ip, 0, predicted_value, lvp_not_cvp);
                     if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end())
                         arch_instr.instr_data = instrOutValues[arch_instr.instr_id][0].second;
                     else
@@ -595,6 +596,7 @@ void O3_CPU::read_from_trace()
                 }
 
                 arch_instr.is_speculative = eligible && speculate;
+                arch_instr.lvp_not_cvp = lvp_not_cvp;
 #endif
 #endif
 
@@ -965,6 +967,7 @@ void O3_CPU::decode_and_dispatch()
 
         ooo_model_instr &tmp = DECODE_BUFFER.entry[DECODE_BUFFER.head];
         addToLT(tmp.ip, (InstClass)instrTypesCvp[tmp.ip], tmp.source_registers, NUM_INSTR_SOURCES);
+        updateRAT(tmp.ip, tmp.destination_registers, tmp.num_reg_ops);
 
         ROB.tail++;
         if (ROB.tail >= ROB.SIZE)
@@ -2154,15 +2157,22 @@ uint32_t O3_CPU::complete_execution(uint32_t rob_index)
                 if (ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
 
                 // Speculatively update the VT as well
-                uint64_t actual_addr = (instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass) ?
+                InstClass insttype = (InstClass) instrTypesCvp[ROB.entry[rob_index].ip];
+                uint64_t actual_addr = (insttype == InstClass::loadInstClass) ?
                                 ROB.entry[rob_index].destination_memory[0] : 0xdeadbeef;
+
                 updateVT(std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH, // distance < retire width
-                    (instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass),
+                    (insttype == InstClass::loadInstClass),
+                    ROB.entry[rob_index].is_speculative,
+                    ROB.entry[rob_index].lvp_not_cvp,
                     ROB.entry[rob_index].ip,
                     ROB.entry[rob_index].instr_id,
                     actual_addr,
                     ROB.entry[rob_index].instr_data,
-                    0);
+                    0,
+                    insttype,
+                    ROB.entry[rob_index].source_registers,
+                    NUM_INSTR_SOURCES);
 #endif
 
                 DP(if (warmup_complete[cpu]) {

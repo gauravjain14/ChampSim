@@ -146,6 +146,12 @@ struct MyPredictor {
 
 void updateBHR(bool taken);
 
+bool getPrediction(uint64_t seq_no, 
+				uint64_t pc, 
+				uint8_t piece, 
+				uint64_t &predicted_value, 
+				bool &lvp_not_cvp);
+
 void populateTraceInfo(uint64_t seq_no,			  // dynamic micro-instruction # (starts at 0 and increments indefinitely)
 					   uint8_t prediction_result, // 0: incorrect, 1: correct, 2: unknown (not revealed)
 					   uint64_t pc,
@@ -154,12 +160,33 @@ void populateTraceInfo(uint64_t seq_no,			  // dynamic micro-instruction # (star
 					   uint64_t src1,
 					   uint64_t src2,
 					   uint64_t src3,
-					   uint64_t dst);
+					   uint64_t dst); 
 
 void updateVT(bool critical,
 			bool eligible,
+			bool speculated,
+			bool lvp_not_cvp,
 			uint64_t pc,
 			uint64_t seq_no,
 			uint64_t actual_addr,
 			uint64_t actual_value,
-			uint64_t actual_latency);
+			uint64_t actual_latency,
+			InstClass insttype,
+			uint8_t *source_registers, 
+			uint32_t num_src_regs);
+
+void updateRAT(uint64_t pc, 
+				uint8_t *destination_registers, 
+				uint32_t num_dst_regs);
+
+bool addToCIT(uint64_t pc);
+bool getFromCIT(uint64_t pc);
+bool checkLT(uint64_t pc);
+bool checkVT(uint64_t pc, uint8_t index);
+bool checkCIT(uint64_t pc);
+void addToLT(uint64_t pc, InstClass type, uint8_t *source_registers, uint32_t num_src_regs);
+void addToLT(uint8_t src_reg);
+bool addToVT(uint64_t pc, uint8_t index, uint64_t actual_value, bool eligible);
+int rand16();
+void beginPredictor(int argc_other, char **argv_other);
+void endPredictor();

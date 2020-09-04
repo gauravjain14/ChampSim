@@ -178,6 +178,7 @@ class ooo_model_instr {
 
     // For Focused Value Predictor
     bool is_critical;  // FVPChange
+    bool lvp_not_cvp;
 
     ooo_model_instr() {
         instr_id = 0;
