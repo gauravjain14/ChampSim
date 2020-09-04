@@ -203,7 +203,7 @@ void finish_warmup()
     // note: since re-ordering he function calls in the main simulation loop, it's no longer necessary to add
     //       extra latency for scheduling and execution, unless you want these steps to take longer than 1 cycle.
     SCHEDULING_LATENCY = 0;
-    EXEC_LATENCY = 0;
+    EXEC_LATENCY = 2;
     DECODE_LATENCY = 2;
     PAGE_TABLE_LATENCY = 100;
     SWAP_LATENCY = 100000;
@@ -1074,6 +1074,8 @@ int main(int argc, char **argv)
         cout << "Number of times Exec called " << ooo_cpu[i].num_times_execute_called << endl;
         cout << "Avg exec utilisation " << ooo_cpu[i].avg_exec_utilisation << endl;
         cout << "Avg actually scheduled " << ooo_cpu[i].avg_actual_scheduled << endl;
+
+        endPredictor();
 
 #ifdef CVP_DEBUG_PRINT
         vp_eligible_speculate_fp = fopen("VP_Eligible_Speculate.txt", "w");

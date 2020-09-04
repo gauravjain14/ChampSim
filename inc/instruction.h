@@ -112,6 +112,7 @@ class ooo_model_instr {
              event_cycle;
 
     uint64_t instr_data;
+    bool markForCvp;
 
     uint8_t is_branch,
             is_memory,

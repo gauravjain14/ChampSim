@@ -11,12 +11,14 @@ TraceInfo trace;
 uint64_t num_getPred = 0;
 uint64_t num_specUpd = 0;
 uint64_t num_updPred = 0;
+uint32_t num_bhr_updates = 0;
 
 void updateBHR(bool taken) {
+	num_bhr_updates++;
 	predictor.bhr = (predictor.bhr << 1) | taken;
 }
 
-bool getPrediction(uint64_t seq_no, uint64_t pc, uint8_t piece, uint64_t &predicted_value) 
+bool getPrediction(uint64_t seq_no, uint64_t pc, uint8_t piece, uint64_t &predicted_value, bool &markForCVP)
 {
 	num_getPred++;
 	
@@ -25,14 +27,28 @@ bool getPrediction(uint64_t seq_no, uint64_t pc, uint8_t piece, uint64_t &predic
 	uint8_t vtIdx = pc & (VT_SIZE - 1);
 	uint8_t branchVTIdx = (pc ^ predictor.bhr) & (VT_SIZE - 1);
 
-	// use last value prediction first. If not found, check context value prediction
+	/* The paper says this: If the instruction is not predictable by Last value prediction
+	mark it for context value prediction and then after execution record the instruction
+	at (pc ^ BHR).
+	Q) What do we do if the instruction is not found in the VT at (pc)? We don't bother about
+	adding it for Context value prediction, right? */
+
 	if (checkVT(pc, vtIdx)) {
-		if(predictor.VT.entry[vtIdx].confidence == 8) { // && predictor.VT.entry[vtIdx].no_predict != 4) {
+		if (predictor.VT.entry[vtIdx].confidence == 8) { // && predictor.VT.entry[vtIdx].no_predict != 4) {
 			predicted_value = predictor.VT.entry[vtIdx].data;
 			return true;
 		}
-	} else if (checkVT(pc, branchVTIdx)) {
+
+		markForCVP = (predictor.VT.entry[vtIdx].no_predict == 4);
+	} 
+
+	// if the entry was not predictable by last value prediction:
+	// Do we set markForCVP = false or we carry this information so that when we are updating
+	// the VT we know that we don't need to bother about checking for the last value prediction entry?
+
+	if (checkVT(pc, branchVTIdx)) {
 		if(predictor.VT.entry[branchVTIdx].confidence == 8) { // && predictor.VT.entry[vtIdx].no_predict != 4) {
+			//std::cout << "Using context value prediction" << std::endl;
 			predicted_value = predictor.VT.entry[branchVTIdx].data;
 			return true;
 		}
@@ -52,11 +68,10 @@ void populateTraceInfo(uint64_t seq_no,			  // dynamic micro-instruction # (star
 					   uint64_t src3,
 					   uint64_t dst) {
 	
-	assert(trace.info[seq_no].pc == pc);
+	//assert(trace.info[seq_no].pc == pc);
 	/*
 	RAT : Update the RAT for the destination register with the current pc
 	*/
-	predictor.RAT.entry[dst].pc = pc;
 	trace.info[seq_no].next_pc = next_pc;
 	trace.info[seq_no].insttype = insn;
 	trace.info[seq_no].src1 = src1;
@@ -66,63 +81,61 @@ void populateTraceInfo(uint64_t seq_no,			  // dynamic micro-instruction # (star
 	trace.info[seq_no].prediction_result = prediction_result;
 }
 
+void updateRAT(uint64_t pc, uint8_t dst) {
+	predictor.RAT.entry[dst].pc = pc;
+}
+
 void updateVT(bool critical, // we need this for context-value-prediction
 			bool eligible,
 			uint64_t pc,
 			uint64_t seq_no,
 			uint64_t actual_addr,
 			uint64_t actual_value,
-			uint64_t actual_latency)
+			uint64_t actual_latency,
+			bool markForCVP)
 {
 	uint8_t vtIdx = pc & (VT_SIZE - 1);
-	if (checkVT(pc, vtIdx) && eligible) {
-		// if the entry is not predictable and critical, use context value prediction
-		if (predictor.VT.entry[vtIdx].no_predict == 4 && critical) {
-			// XOR the PC with the BHR to get the hash
-			uint8_t branchVtIdx = ((pc ^ predictor.bhr)) & (VT_SIZE - 1);
-			if (checkVT(pc, branchVtIdx)) {
-				if (predictor.VT.entry[branchVtIdx].data == actual_value) {
-					// we know data is repeating
-					predictor.VT.entry[branchVtIdx].confidence = std::min(predictor.VT.entry[branchVtIdx].confidence+rand16(), 8);
-					predictor.VT.entry[branchVtIdx].utility = std::min(predictor.VT.entry[branchVtIdx].utility+1, 4);
-					predictor.VT.entry[branchVtIdx].no_predict = (predictor.VT.entry[branchVtIdx].confidence == 8) ?
-																	0 : predictor.VT.entry[branchVtIdx].no_predict;
-				} else {
-					predictor.VT.entry[branchVtIdx].confidence = 0;
-					predictor.VT.entry[branchVtIdx].utility = 0;
-					predictor.VT.entry[branchVtIdx].no_predict = std::min(predictor.VT.entry[branchVtIdx].no_predict+1, 4);
-					predictor.VT.entry[branchVtIdx].data = actual_value;
-				}				
-			}
-		} else {
-			if (predictor.VT.entry[vtIdx].data == actual_value) {
+	uint8_t branchVtIdx = ((pc ^ predictor.bhr)) & (VT_SIZE - 1);
+
+	if (markForCVP && eligible) {
+		if (checkVT(pc, branchVtIdx)) {
+			if (predictor.VT.entry[branchVtIdx].data == actual_value) {
 				// we know data is repeating
-				predictor.VT.entry[vtIdx].confidence = std::min(predictor.VT.entry[vtIdx].confidence+rand16(), 8); // Confidence incremented with a 1/16 probability
-				predictor.VT.entry[vtIdx].utility = std::min(predictor.VT.entry[vtIdx].utility+1, 4);
-				predictor.VT.entry[vtIdx].no_predict = (predictor.VT.entry[vtIdx].confidence == 8) ? 0 : predictor.VT.entry[vtIdx].no_predict;
+				predictor.VT.entry[branchVtIdx].confidence = std::min(predictor.VT.entry[branchVtIdx].confidence+rand16(), 8);
+				predictor.VT.entry[branchVtIdx].utility = std::min(predictor.VT.entry[branchVtIdx].utility+1, 4);
+				predictor.VT.entry[branchVtIdx].no_predict = (predictor.VT.entry[branchVtIdx].confidence == 8) ?
+																0 : predictor.VT.entry[branchVtIdx].no_predict;
 			} else {
-				predictor.VT.entry[vtIdx].confidence = 0;
-				predictor.VT.entry[vtIdx].utility = 0;
-				predictor.VT.entry[vtIdx].no_predict = std::min(predictor.VT.entry[vtIdx].no_predict+1, 4);
-				predictor.VT.entry[vtIdx].data = actual_value;
+				predictor.VT.entry[branchVtIdx].confidence = 0;
+				predictor.VT.entry[branchVtIdx].utility = 0;
+				predictor.VT.entry[branchVtIdx].no_predict = std::min(predictor.VT.entry[branchVtIdx].no_predict+1, 4);
+				predictor.VT.entry[branchVtIdx].data = actual_value;
+			}				
+		} else { // add the instruction or decrease the utility
+			if (predictor.VT.entry[branchVtIdx].tag == 0xdeadbeef) {
+				predictor.VT.entry[branchVtIdx].set(pc, 0, 4, actual_value, 0);
+			} else {
+				predictor.VT.entry[branchVtIdx].utility = std::max(predictor.VT.entry[vtIdx].utility-1,0); // Decrement utility
+				if(predictor.VT.entry[branchVtIdx].utility == 0) {	// Utility has dropped to 0 so it can be evicted
+					predictor.VT.entry[branchVtIdx].set(pc, 0, 4, actual_value, 0); // Utility is saturated initially.
+				}
 			}
+		}
+	} else if (checkVT(pc, vtIdx) && eligible) {
+		if (predictor.VT.entry[vtIdx].data == actual_value) {
+			// we know data is repeating
+			predictor.VT.entry[vtIdx].confidence = std::min(predictor.VT.entry[vtIdx].confidence+rand16(), 8); // Confidence incremented with a 1/16 probability
+			predictor.VT.entry[vtIdx].utility = std::min(predictor.VT.entry[vtIdx].utility+1, 4);
+			predictor.VT.entry[vtIdx].no_predict = (predictor.VT.entry[vtIdx].confidence == 8) ? 0 : predictor.VT.entry[vtIdx].no_predict;
+		} else {
+			predictor.VT.entry[vtIdx].confidence = 0;
+			predictor.VT.entry[vtIdx].utility = 0;
+			predictor.VT.entry[vtIdx].no_predict = std::min(predictor.VT.entry[vtIdx].no_predict+1, 4);
+			predictor.VT.entry[vtIdx].data = actual_value;
 		}
 	} else if (checkLT(pc)) {
 		migrateLTtoVT(pc, seq_no, eligible, actual_value);
 	}
-}
-
-void beginPredictor(int argc_other, char **argv_other)
-{
-    return;
-}
-
-void endPredictor() 
-{
-
-	printf("GetPredictions = %ld, SpeculativeUpdates = %ld, UpdatePredictors = %ld", num_getPred, num_specUpd, num_updPred);
-
-    return;
 }
 
 bool addToCIT(uint64_t pc) {
@@ -187,47 +200,19 @@ void addToLT(uint64_t pc, InstClass type, uint8_t *source_registers, uint32_t nu
         for (int i=0; i<num_src_regs; i++) {
             if (source_registers[i])
 				addToLT(source_registers[i]);        
-        }        
+        }
     }
 }
 
 void addToLT(uint8_t src_reg) {
 	// get the pc from the RAT
 	uint64_t pc = predictor.RAT.entry[src_reg].pc;
-	uint32_t ltindex = pc & (LT_SIZE-1);
+	if (pc != 0xdeadbeef) {
+		uint32_t ltindex = pc & (LT_SIZE-1);
 
-	// we are trying to overwrite an entry in the LT. Is that legal? What about thrashing?
-	predictor.LT.entry[ltindex].pc = pc;
-}
-
-bool migrateCITtoVT(uint8_t citIdx, bool eligible, uint64_t actual_value) {
-
-	uint64_t pc = predictor.CIT.entry[citIdx].tag;
-	uint8_t vtIdx = pc % VT_SIZE;
-
-    //std::cout << "PC = " << std::hex << pc << std::dec << " Migrated from CIT to VT" << std::endl;
-    
-	assert(predictor.VT.entry[vtIdx].tag != pc);
-
-	// Try inserting into the VT. Will be successful if either the slot is empty or the utility of existing entry has become 0.
-	bool migration_complete = false;
-	if(predictor.VT.entry[vtIdx].tag == 0xdeadbeef) {	// VT entry is empty
-		predictor.VT.entry[vtIdx].set(pc, 0, 4, actual_value, eligible ? 0 : 4); // Utility is saturated initially, Initialize to "not predictable" if not eligible
-		migration_complete = true;
+		// we are trying to overwrite an entry in the LT. Is that legal? What about thrashing?
+		predictor.LT.entry[ltindex].pc = pc;
 	}
-	else {	// VT entry contains some other PC. It cannot contain current PC as specified by assert statement above.
-		predictor.VT.entry[vtIdx].utility = std::max(predictor.VT.entry[vtIdx].utility-1,0); // Decrement utility
-		if(predictor.VT.entry[vtIdx].utility == 0) {	// Utility has dropped to 0 so it can be evicted
-			predictor.VT.entry[vtIdx].set(pc, 0, 4, actual_value, eligible?0:4); // Utility is saturated initially, Initialize to "not predictable" if not eligible
-			migration_complete = true;
-		}
-	}
-
-	if(migration_complete) {	// If entry successfully sent to VT then evict from CIT
-		predictor.CIT.entry[citIdx].clear();
-	}
-
-	return migration_complete;
 }
 
 bool migrateLTtoVT(uint64_t pc, uint64_t seq_no, bool eligible, uint64_t actual_value) {
@@ -243,7 +228,7 @@ bool migrateLTtoVT(uint64_t pc, uint64_t seq_no, bool eligible, uint64_t actual_
 	*/
 
 	bool migration_complete = false;
-	uint8_t utility = (!eligible) ? 4 : 0; // what do we do for non-load instructions? Set them
+	uint8_t utility = (eligible) ? 4 : 0; // what do we do for non-load instructions? Set them
 	uint8_t no_predict = (!eligible) ? 4 : 0;
 	if (!checkVT(pc, vtIdx)) {
 		if (predictor.VT.entry[vtIdx].tag == 0xdeadbeef) {
@@ -251,7 +236,7 @@ bool migrateLTtoVT(uint64_t pc, uint64_t seq_no, bool eligible, uint64_t actual_
 		} else {
 			predictor.VT.entry[vtIdx].utility = std::max(predictor.VT.entry[vtIdx].utility-1,0); // Decrement utility
 			if(predictor.VT.entry[vtIdx].utility == 0) {	// Utility has dropped to 0 so it can be evicted
-				predictor.VT.entry[vtIdx].set(pc, 0, 4, actual_value, 0); // Utility is saturated initially.
+				predictor.VT.entry[vtIdx].set(pc, 0, utility, actual_value, 0); // Utility is saturated initially.
 				migration_complete = true;
 			}
 		}
@@ -286,6 +271,10 @@ void addParentsToLT(uint64_t src1, uint64_t src2, uint64_t src3) {
 		uint8_t ltIdx3 = src3_pc % LT_SIZE;
 		predictor.LT.entry[ltIdx3].pc = src3_pc; 
 	}
+}
+
+void endPredictor() {
+	std::cout << "Number of times BHR called " << num_bhr_updates << std::endl;
 }
 
 int rand16() {

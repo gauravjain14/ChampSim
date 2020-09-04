@@ -539,8 +539,10 @@ void O3_CPU::read_from_trace()
                 arch_instr.instr_data = 0xcafedead;
 
                 bool speculate = false;
+                bool markForCvp = false;
                 if (eligible) {
-                    speculate = getPrediction(arch_instr.instr_id, arch_instr.ip, 0, predicted_value);
+                    speculate = getPrediction(arch_instr.instr_id, arch_instr.ip, 0, predicted_value, markForCvp);
+                    arch_instr.markForCvp = markForCvp;
                     if (instrOutValues.find(arch_instr.instr_id) != instrOutValues.end())
                         arch_instr.instr_data = instrOutValues[arch_instr.instr_id][0].second;
                     else
@@ -585,14 +587,7 @@ void O3_CPU::read_from_trace()
 
                 next_pc = (arch_instr.is_branch && arch_instr.branch_taken) ?
                                     arch_instr.branch_target : arch_instr.ip + 4;
-                if (eligible && arch_instr.destination_registers[0]) {
-                    uint64_t src1 = (uint64_t)arch_instr.source_registers[0];
-                    uint64_t src2 = (uint64_t)arch_instr.source_registers[1];
-                    uint64_t src3 = (uint64_t)arch_instr.source_registers[2];
-                    uint64_t dest = (uint64_t)arch_instr.destination_registers[0];
-                    populateTraceInfo(arch_instr.instr_id, prediction_result,
-                                    arch_instr.ip, next_pc, insn, src1, src2, src3, dest);
-                }
+//                if (eligible && arch_instr.destination_registers[0]) {
 
                 arch_instr.is_speculative = eligible && speculate;
 #endif
@@ -964,6 +959,15 @@ void O3_CPU::decode_and_dispatch()
         ROB.entry[ROB.tail].event_cycle = current_core_cycle[cpu];
 
         ooo_model_instr &tmp = DECODE_BUFFER.entry[DECODE_BUFFER.head];
+
+        // This shouldn't be done just for load instructions
+        if (tmp.destination_registers[0]) {
+            uint64_t src1 = (uint64_t)tmp.source_registers[0];
+            uint64_t src2 = (uint64_t)tmp.source_registers[1];
+            uint64_t src3 = (uint64_t)tmp.source_registers[2];
+            uint64_t dest = (uint64_t)tmp.destination_registers[0];
+            updateRAT(tmp.ip, dest);
+        }
         addToLT(tmp.ip, (InstClass)instrTypesCvp[tmp.ip], tmp.source_registers, NUM_INSTR_SOURCES);
 
         ROB.tail++;
@@ -2110,6 +2114,9 @@ uint32_t O3_CPU::complete_execution(uint32_t rob_index)
                 fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
             }
 
+            // update the global BHR
+            if (ROB.entry[rob_index].is_branch) { updateBHR(ROB.entry[rob_index].branch_taken); }
+
             DP(if (warmup_complete[cpu]) {
             cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
             cout << " branch_mispredicted: " << +ROB.entry[rob_index].branch_mispredicted << " fetch_stall: " << +fetch_stall;
@@ -2143,12 +2150,10 @@ uint32_t O3_CPU::complete_execution(uint32_t rob_index)
                     fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
                 }
 
-                // update the global BHR
-                if (ROB.entry[rob_index].is_branch) { updateBHR(ROB.entry[rob_index].branch_taken); }
-
                 // FVP: Instruction is a candidate for being a critical instruction
-                // if its inside the RETIRE WIDTH at this time
-                if (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH) {
+                // if its inside the RETIRE WIDTH at this time -- mark only load instructions as critical
+                if (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH &&
+                            (InstClass)instrTypesCvp[ROB.entry[rob_index].ip] == InstClass::loadInstClass) {
                     ROB.entry[rob_index].is_critical = addToCIT(ROB.entry[rob_index].ip);
                 }
                 if (ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
@@ -2162,7 +2167,8 @@ uint32_t O3_CPU::complete_execution(uint32_t rob_index)
                     ROB.entry[rob_index].instr_id,
                     actual_addr,
                     ROB.entry[rob_index].instr_data,
-                    0);
+                    0,
+                    ROB.entry[rob_index].markForCvp);
 #endif
 
                 DP(if (warmup_complete[cpu]) {

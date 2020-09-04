@@ -8,7 +8,7 @@
 
 #define CIT_SIZE 32
 #define CT_TAG_SIZE 11
-#define VT_SIZE 64
+#define VT_SIZE 256
 #define LOG2_VT_SIZE 6
 #define RAT_SIZE 64
 #define LT_SIZE 8
@@ -74,7 +74,7 @@ struct MyPredictor {
 		// All the 64-bits of the PC shouldn't be used as the tag, right? At least that's 
 		// what the paper on FVP says
 		void set(uint64_t in_tag, uint8_t in_confidence, uint8_t in_utility, uint64_t in_data, uint8_t in_no_predict) {
-			tag = bitExtract<uint64_t>(in_tag, LOG2_VT_SIZE, VT_TAG_SIZE); // in_tag 
+			tag = bitExtract<uint64_t>(in_tag, LOG2_VT_SIZE, VT_TAG_SIZE);
 			confidence = in_confidence;
 			utility = in_utility;
 			data = in_data;
@@ -156,10 +156,15 @@ void populateTraceInfo(uint64_t seq_no,			  // dynamic micro-instruction # (star
 					   uint64_t src3,
 					   uint64_t dst);
 
+void updateRAT(uint64_t pc, uint8_t dst);
+
 void updateVT(bool critical,
 			bool eligible,
 			uint64_t pc,
 			uint64_t seq_no,
 			uint64_t actual_addr,
 			uint64_t actual_value,
-			uint64_t actual_latency);
+			uint64_t actual_latency,
+			bool markForCVP);
+
+void endPredictor();
