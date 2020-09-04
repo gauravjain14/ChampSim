@@ -1052,6 +1052,8 @@ int main(int argc, char **argv)
         cout << "Value Predictor Statistics " << endl;
         endPredictor();
         cout << "Number of instruction type mismatches " << ooo_cpu[i].num_instr_type_mismatch << endl;
+        cout << "Number of instructions with more than one destination register = " << ooo_cpu[i].num_multidst_instr << endl;
+        cout << "Total number of branch instructions = " << ooo_cpu[i].num_total_branch << endl;
         cout << "Number of instructions eligible for vp " << ooo_cpu[i].num_instr_eligible_vp << endl;
         cout << "Number of instructions for vp speculation " << ooo_cpu[i].num_instr_speculate_vp << endl;
         cout << "Number of critical instructions " << ooo_cpu[i].num_instr_critical_vp << endl;

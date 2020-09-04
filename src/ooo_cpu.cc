@@ -310,6 +310,9 @@ void O3_CPU::read_from_trace()
                     }
                 }
 
+                arch_instr.num_dst_regs = num_reg_ops;
+                if(arch_instr.num_dst_regs > 1) num_multidst_instr++;
+
                 for (int i = 0; i < NUM_INSTR_SOURCES; i++)
                 {
                     arch_instr.source_registers[i] = current_instr.source_registers[i];
@@ -399,7 +402,6 @@ void O3_CPU::read_from_trace()
                 }
 
                 total_branch_types[arch_instr.branch_type]++;
-
                 if ((arch_instr.is_branch == 1) && (arch_instr.branch_taken == 1))
                 {
                     arch_instr.branch_target = next_instr.ip;
@@ -410,7 +412,7 @@ void O3_CPU::read_from_trace()
                 {
                     arch_instr.destination_registers[i] = current_instr.destination_registers[i];
                     arch_instr.destination_memory[i] = current_instr.destination_memory[i];
-                    arch_instr.destination_virtual_address[i] = current_instr.destination_memory[i];\
+                    arch_instr.destination_virtual_address[i] = current_instr.destination_memory[i];
 
                     if (arch_instr.destination_registers[i])
                         num_reg_ops++;
@@ -599,6 +601,8 @@ void O3_CPU::read_from_trace()
                 arch_instr.lvp_not_cvp = lvp_not_cvp;
 #endif
 #endif
+
+                if(arch_instr.is_branch == 1) num_total_branch++;
 
                 // add this instruction to the IFETCH_BUFFER
                 if (IFETCH_BUFFER.occupancy < IFETCH_BUFFER.SIZE)
@@ -967,7 +971,7 @@ void O3_CPU::decode_and_dispatch()
 
         ooo_model_instr &tmp = DECODE_BUFFER.entry[DECODE_BUFFER.head];
         addToLT(tmp.ip, (InstClass)instrTypesCvp[tmp.ip], tmp.source_registers, NUM_INSTR_SOURCES);
-        updateRAT(tmp.ip, tmp.destination_registers, tmp.num_reg_ops);
+        if(tmp.num_dst_regs == 1) updateRAT(tmp.ip, tmp.destination_registers, 1);
 
         ROB.tail++;
         if (ROB.tail >= ROB.SIZE)
@@ -2113,6 +2117,9 @@ uint32_t O3_CPU::complete_execution(uint32_t rob_index)
                 fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
             }
 
+            // update the global BHR
+            if (ROB.entry[rob_index].is_branch) { updateBHR(ROB.entry[rob_index].branch_taken); }
+
             DP(if (warmup_complete[cpu]) {
             cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
             cout << " branch_mispredicted: " << +ROB.entry[rob_index].branch_mispredicted << " fetch_stall: " << +fetch_stall;
@@ -2145,9 +2152,6 @@ uint32_t O3_CPU::complete_execution(uint32_t rob_index)
                 {
                     fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
                 }
-
-                // update the global BHR
-                if (ROB.entry[rob_index].is_branch) { updateBHR(ROB.entry[rob_index].branch_taken); }
 
                 // FVP: Instruction is a candidate for being a critical instruction
                 // if its inside the RETIRE WIDTH at this time

@@ -136,7 +136,7 @@ class ooo_model_instr {
             decoded = 0,
             scheduled = 0,
             executed = 0;
-    int num_reg_ops, num_mem_ops, num_reg_dependent;
+    int num_reg_ops, num_mem_ops, num_reg_dependent, num_dst_regs;
 
     uint8_t destination_registers[NUM_INSTR_DESTINATIONS_SPARC]; // output registers
 

@@ -18,8 +18,11 @@ uint64_t num_lvp_hits = 0;
 uint64_t num_cvp_entries = 0;
 uint64_t num_cvp_hits = 0;
 
+uint64_t num_upd_bhr = 0;
+
 void updateBHR(bool taken) {
 	predictor.bhr = (predictor.bhr << 1) | taken;
+	num_upd_bhr++;
 }
 
 bool getPrediction(uint64_t seq_no, uint64_t pc, uint8_t piece, uint64_t &predicted_value, bool &lvp_not_cvp) 
@@ -484,6 +487,7 @@ void endPredictor()
 	printf("GetPredictions = %ld, LastValuePs = %ld, ContextValuePs = %ld\n", num_getPred, num_lvp, num_cvp);
 	printf("LVP --> Entries = %ld, Hits = %ld\n", num_lvp_entries, num_lvp_hits);
 	printf("CVP --> Entries = %ld, Hits = %ld\n", num_cvp_entries, num_cvp_hits);
+	printf("num_upd_bhr = %ld\n", num_upd_bhr);
 
     return;
 }

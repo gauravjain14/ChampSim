@@ -82,6 +82,9 @@ public:
   std::unordered_map<uint8_t, uint32_t> vp_instr_type_pred_count;
   std::vector<std::pair<uint64_t, uint8_t>> eligible_speculate_type;
 
+  uint64_t num_multidst_instr = 0;
+  uint64_t num_total_branch = 0;
+
   uint32_t num_instr_critical_vp = 0; // FVPChange
   uint32_t num_exec_under_utilised = 0;
   uint32_t num_times_execute_called = 0;
