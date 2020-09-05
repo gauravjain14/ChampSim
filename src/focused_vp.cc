@@ -98,7 +98,7 @@ void populateTraceInfo(uint64_t seq_no,			  // dynamic micro-instruction # (star
 }
 
 
-void updateVT(bool critical, // we need this for context-value-prediction
+bool updateVT(bool critical, // we need this for context-value-prediction
 			bool eligible,
 			bool speculated,
 			bool lvp_not_cvp,
@@ -151,11 +151,14 @@ void updateVT(bool critical, // we need this for context-value-prediction
 	}
 	*/
 
+	bool hit_in_VT = false;
+
 	uint8_t vtIdx = pc & (VT_SIZE - 1);
 	uint8_t branchvtIdx = (pc ^ predictor.bhr) & (VT_SIZE - 1);
 
 	// Do what's needed at the Last Value Prediction slot
 	if(checkVT(pc, vtIdx)) {
+		hit_in_VT = true;
 		num_lvp_hits++;
 		if(speculated && lvp_not_cvp) {
 			if (predictor.VT.entry[vtIdx].data == actual_value) {
@@ -190,6 +193,7 @@ void updateVT(bool critical, // we need this for context-value-prediction
 	
 	// Do what's needed at the Context Value Prediction slot
 	if(checkVT(pc, branchvtIdx)) {
+		hit_in_VT = true;
 		num_cvp_hits++;
 		if(speculated && !lvp_not_cvp) {
 			if (predictor.VT.entry[branchvtIdx].data == actual_value) {
@@ -225,21 +229,13 @@ void updateVT(bool critical, // we need this for context-value-prediction
 	// Add to the Context Value Prediction slot if it's not predictable by LVP
 	if(checkVT(pc, vtIdx) && predictor.VT.entry[vtIdx].no_predict == 4 && !checkVT(pc, branchvtIdx)) {
 		bool added_for_cvp = addToVT(pc, branchvtIdx, actual_value, eligible);
-		if(added_for_cvp) num_cvp_entries++;
-	}
-
-	// Add the LT entry to VT if there is a hit in LT
-	if(checkLT(pc) && !checkVT(pc, vtIdx) && !checkVT(pc, branchvtIdx)) {
-		bool added_to_vt = addToVT(pc, vtIdx, actual_value, eligible);
-		if(added_to_vt) {
-			uint8_t ltindex = pc & (LT_SIZE - 1);
-			predictor.LT.entry[ltindex].pc = 0xdeadbeef;
-			num_lvp_entries++;
+		if(added_for_cvp) {
+			hit_in_VT = true;
+			num_cvp_entries++;
 		}
 	}
 
 	// Update the CIT
-
 	uint8_t citIdx = pc & (CIT_SIZE - 1);
 
 	if(checkCIT(pc) && !checkVT(pc, vtIdx) && !checkVT(pc, branchvtIdx)) {
@@ -255,6 +251,7 @@ void updateVT(bool critical, // we need this for context-value-prediction
 			assert(!checkVT(pc,vtIdx) && !checkVT(pc, branchvtIdx)) ;
 			bool added_to_VT = addToVT(pc, vtIdx, actual_value, eligible);
 			if(added_to_VT) {
+				hit_in_VT = true;
 				addToLT(pc, insttype, source_registers, num_src_regs);
 				predictor.CIT.entry[citIdx].clear(); // Remove from CIT if it successfully goes to VT	
 				num_lvp_entries++;
@@ -266,7 +263,25 @@ void updateVT(bool critical, // we need this for context-value-prediction
 		}
 	}
 
+return hit_in_VT;
 }
+
+void updateLT(uint64_t pc, uint64_t actual_value, bool eligible) {
+
+	uint8_t vtIdx = pc & (VT_SIZE - 1);
+	uint8_t branchvtIdx = (pc ^ predictor.bhr) & (VT_SIZE - 1);
+
+	// Add the LT entry to VT if there is a hit in LT
+	if(checkLT(pc) && !checkVT(pc, vtIdx) && !checkVT(pc, branchvtIdx)) {
+		bool added_to_vt = addToVT(pc, vtIdx, actual_value, eligible);
+		if(added_to_vt) {
+			uint8_t ltindex = pc & (LT_SIZE - 1);
+			predictor.LT.entry[ltindex].pc = 0xdeadbeef;
+			num_lvp_entries++;
+		}
+	}
+
+} 
 
 bool addToCIT(uint64_t pc) {
 	uint64_t citIdx = pc & (CIT_SIZE - 1);
@@ -331,7 +346,7 @@ void addToLT(uint64_t pc, InstClass type, uint8_t *source_registers, uint32_t nu
     bool isCritical = getFromCIT(pc);
 	uint8_t vtIdx = pc & (VT_SIZE - 1);
 	uint8_t branchvtIdx = (pc ^ predictor.bhr) & (VT_SIZE - 1);
-	bool isNotPredictable = checkVT(pc, branchvtIdx) && (predictor.VT.entry[branchvtIdx].no_predict == 4);
+	bool isNotPredictable = (checkVT(pc, vtIdx) && (predictor.VT.entry[vtIdx].no_predict == 4) || !checkVT(pc, vtIdx)) && (checkVT(pc, branchvtIdx) && (predictor.VT.entry[branchvtIdx].no_predict == 4));
 
     if (isCritical || isNotPredictable) {
         for (int i=0; i<num_src_regs; i++) {

@@ -162,7 +162,7 @@ void populateTraceInfo(uint64_t seq_no,			  // dynamic micro-instruction # (star
 					   uint64_t src3,
 					   uint64_t dst); 
 
-void updateVT(bool critical,
+bool updateVT(bool critical,
 			bool eligible,
 			bool speculated,
 			bool lvp_not_cvp,
@@ -174,6 +174,10 @@ void updateVT(bool critical,
 			InstClass insttype,
 			uint8_t *source_registers, 
 			uint32_t num_src_regs);
+
+void updateLT(uint64_t pc, 
+				uint64_t actual_value, 
+				bool eligible);
 
 void updateRAT(uint64_t pc, 
 				uint8_t *destination_registers, 

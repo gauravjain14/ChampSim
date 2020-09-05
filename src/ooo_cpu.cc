@@ -2120,6 +2120,13 @@ uint32_t O3_CPU::complete_execution(uint32_t rob_index)
             // update the global BHR
             if (ROB.entry[rob_index].is_branch) { updateBHR(ROB.entry[rob_index].branch_taken); }
 
+            InstClass insttype = (InstClass) instrTypesCvp[ROB.entry[rob_index].ip];
+
+            updateLT(ROB.entry[rob_index].ip,
+                ROB.entry[rob_index].instr_data,
+                (insttype == InstClass::loadInstClass));
+
+
             DP(if (warmup_complete[cpu]) {
             cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
             cout << " branch_mispredicted: " << +ROB.entry[rob_index].branch_mispredicted << " fetch_stall: " << +fetch_stall;
@@ -2153,19 +2160,12 @@ uint32_t O3_CPU::complete_execution(uint32_t rob_index)
                     fetch_resume_cycle = current_core_cycle[cpu] + VALUE_MISPREDICT_PENALTY;
                 }
 
-                // FVP: Instruction is a candidate for being a critical instruction
-                // if its inside the RETIRE WIDTH at this time
-                if (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH) {
-                    ROB.entry[rob_index].is_critical = addToCIT(ROB.entry[rob_index].ip);
-                }
-                if (ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
-
                 // Speculatively update the VT as well
                 InstClass insttype = (InstClass) instrTypesCvp[ROB.entry[rob_index].ip];
                 uint64_t actual_addr = (insttype == InstClass::loadInstClass) ?
                                 ROB.entry[rob_index].destination_memory[0] : 0xdeadbeef;
 
-                updateVT(std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH, // distance < retire width
+                bool hit_in_VT = updateVT(std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH, // distance < retire width
                     (insttype == InstClass::loadInstClass),
                     ROB.entry[rob_index].is_speculative,
                     ROB.entry[rob_index].lvp_not_cvp,
@@ -2177,6 +2177,20 @@ uint32_t O3_CPU::complete_execution(uint32_t rob_index)
                     insttype,
                     ROB.entry[rob_index].source_registers,
                     NUM_INSTR_SOURCES);
+
+                updateLT(ROB.entry[rob_index].ip,
+                        ROB.entry[rob_index].instr_data,
+                        (insttype == InstClass::loadInstClass));
+
+                // FVP: Instruction is a candidate for being a critical instruction
+                // if its inside the RETIRE WIDTH at this time
+                if(!hit_in_VT) {
+                    if (std::abs((double)(rob_index-ROB.head)) < RETIRE_WIDTH) {
+                        ROB.entry[rob_index].is_critical = addToCIT(ROB.entry[rob_index].ip);
+                    }
+                    if (ROB.entry[rob_index].is_critical) num_instr_critical_vp++;
+                }
+
 #endif
 
                 DP(if (warmup_complete[cpu]) {
